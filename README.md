@@ -35,7 +35,7 @@ L'interface est faite avec [Streamlit](https://streamlit.io).
 **En local :**
 
 ```bash
-python src/telechargement.py     # (facultatif) retélécharger les données brutes
+python src/telechargement.py     # télécharger les données (une fois ; non incluses dans le dépôt)
 streamlit run src/main.py        # ouvre http://localhost:8501
 ```
 
