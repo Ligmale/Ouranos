@@ -3,3 +3,6 @@ CLAUDE.md
 donnees/
 modeles/
 pyrightconfig.json
+__pycache__/
+.pytest_cache/
+.coverage
