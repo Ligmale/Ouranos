@@ -15,10 +15,10 @@ from collections.abc import Iterator
 
 # Station de la ville (McTavish) et stations de référence (aéroports), avec leur stationID ECCC.
 STATIONS: dict[str, int] = {
-    "MCTAVISH": 10761,
-    "MONTREAL INTL A": 51157,
-    "MONTREAL/ST-HUBERT": 48374,
-    "MONTREAL MIRABEL INTL A": 49608,
+    "MCTAVISH": 10761,  # McTavish (McGill, centre-ville) — station de la ville
+    "MONTREAL INTL A": 51157,  # Aéroport Montréal-Trudeau (YUL, Dorval) — référence
+    "MONTREAL/ST-HUBERT": 48374,  # Aéroport de St-Hubert (Longueuil) — référence
+    "MONTREAL MIRABEL INTL A": 49608,  # Aéroport de Mirabel (rural, 42 km au nord) — référence
 }
 ANNEE: int = 2025
 
