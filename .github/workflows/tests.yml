@@ -1,0 +1,27 @@
+# Lance les tests pytest à chaque push et à chaque pull request.
+# La VM part de zéro : seuls les fichiers committés sont disponibles
+# (pas de donnees/ ni de modeles/, les tests utilisent tests/fake_donnees/).
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v5
+
+      - name: Installer Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Installer les dépendances
+        run: pip install -r requirements.txt
+
+      - name: Lancer les tests
+        run: pytest
