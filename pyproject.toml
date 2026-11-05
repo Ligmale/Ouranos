@@ -1,0 +1,4 @@
+[tool.pytest.ini_options]
+# Permet aux tests de faire « from station import Station » (code dans src/).
+pythonpath = ["src"]
+testpaths = ["tests"]
