@@ -72,6 +72,13 @@ tests/         tests pytest
 
 _Analyse et limites : à compléter._
 
+## Direction du vent en 8 points
+
+ECCC donne la direction en dizaines de degrés (1 à 36). `direction_8_points` la convertit en
+N, NE, E, SE, S, SO, O ou NO avec `int(dizaines / 4.5 + 0.5) % 8` : chaque secteur fait 45°
+(4,5 dizaines) et est centré sur sa direction, le `+ 0.5` arrondit au secteur le plus proche
+et le `% 8` ramène 360° sur N (le secteur N va de 337,5° à 22,5°).
+
 ## Outil du chapitre 7
 
 _À compléter (une phrase)._
