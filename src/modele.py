@@ -3,7 +3,7 @@ import json
 import joblib
 import numpy as np
 import pandas as pd
-from Exceptions import ErreurPredictionError, DonneeInvalideError
+from exceptions import ErreurPredictionError, DonneeInvalideError
 from sklearn.model_selection import train_test_split
 from sklearn.neural_network import MLPRegressor
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
