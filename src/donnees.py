@@ -72,8 +72,33 @@ def direction_8_points(dizaines_degres: float | None) -> str | None:
     Sortie : N, NE, E, SE, S, SO, O ou NO ; None si l'entrée est manquante.
     Échec : valeur hors de 1 à 36.
     """
-    # TODO : chaque point couvre 45° ; où commence le secteur N ?
-    raise NotImplementedError
+    # Chaque point couvre 45 = 4,5 dizaines, centré sur sa direction :
+    # le secteur N va de 337,5 à 22,5
+    if dizaines_degres is None:
+        return None
+    if dizaines_degres < 1 or dizaines_degres > 36:
+        raise ValueError(f"Direction du vent invalide : {dizaines_degres}")
+    # +0,5 puis int() : arrondi au secteur le plus proche ; % 8 ramène 360° (indice 8) sur N.
+    secteur = int(dizaines_degres / 4.5 + 0.5) % 8
+    match secteur:
+        case 0:
+            return "N"
+        case 1:
+            return "NE"
+        case 2:
+            return "E"
+        case 3:
+            return "SE"
+        case 4:
+            return "S"
+        case 5:
+            return "SO"
+        case 6:
+            return "O"
+        case 7:
+            return "NO"
+        case _:
+            raise ValueError(f"Direction du vent invalide : {dizaines_degres}")
 
 
 # ---------------------------------------------------------------------------
@@ -95,7 +120,7 @@ def apparier(mctavish: pd.DataFrame, reference: pd.DataFrame) -> pd.DataFrame:
     mctavish.assign(Temperature_Cible=mctavish["Temp (°C)"])
     reference.assign(Temperature=reference["Temp (°C)"])
     # 2. jointure interne sur « Date/Time (LST) » ;
-    
+
     # 3. calculer l'écart ;
     # 4. retirer la température de McTavish (sinon fuite de la cible).
     raise NotImplementedError
