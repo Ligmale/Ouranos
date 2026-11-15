@@ -1,11 +1,43 @@
 import os.path as path
-import polars as pl
+import pandas as pd
 
 PATH_DONNEES = path.join(path.dirname(path.abspath(__file__)), "..", "donnees", "brutes")
 STATIONS_ID = [10761, 48374, 49608, 51157]  # McTavish, St-Hubert, Mirabel, YUL (Montréal-Trudeau)
 
+# Types imposés : sinon pandas devine le type colonne par colonne,
+# et une colonne vide ou avec du texte serait lue comme du texte.
+SCHEMA_NUMERIQUE = {
+    "Temp (°C)": "float64",
+    "Dew Point Temp (°C)": "float64",
+    "Rel Hum (%)": "float64",
+    "Precip. Amount (mm)": "float64",
+    "Wind Dir (10s deg)": "float64",
+    "Wind Spd (km/h)": "float64",
+    "Visibility (km)": "float64",
+    "Stn Press (kPa)": "float64",
+    "Hmdx": "float64",
+    "Wind Chill": "float64",
+}
+
+COLONNES_GARDEES = [
+    "Station Name",
+    "Date/Time (LST)",
+    "Temp (°C)",
+    "Dew Point Temp (°C)",
+    "Rel Hum (%)",
+    "Wind Dir (10s deg)",
+    "Wind Spd (km/h)",
+    "Visibility (km)",
+    "Stn Press (kPa)",
+]
+
+COLONNES_CIBLE_GARDEES = ["Temp (°C)", "Date/Time (LST)"]
+
+# Seuil de la tendance de pression sur 3 h (à noter dans DECISIONS.md).
+SEUIL_PRESSION_KPA = 0.1
+
 try:
-    pl.read_csv(path.join(PATH_DONNEES, "10761_2025_10.csv"))
+    pd.read_csv(path.join(PATH_DONNEES, "10761_2025_10.csv"), encoding="utf-8-sig")
 except FileNotFoundError:
     print("Le fichier de données n'existe pas. Veuillez vérifier le chemin et le nom du fichier.")
 
@@ -13,10 +45,18 @@ except FileNotFoundError:
 class Station:
     def __init__(self, station_id: int, mois: list[int] | None = None, years: list[int] | None = None):
         self.station_id = station_id
+        # Deux attributs, un type chacun : les mois bruts, puis le tableau nettoyé.
+        self._brutes: list[pd.DataFrame] = []
+        self._data: pd.DataFrame = pd.DataFrame()
         self.load_data(mois, years)
+        self.clean_data()
 
-    def load_data(self, mois: list[int] | None = None, years: list[int] | None = None) -> None:
-        self.data = []
+    @property
+    def data(self) -> pd.DataFrame:
+        return self._data
+
+    def load_data(self, mois: list[int] | None = None, years: list[int] | None = None) -> list[pd.DataFrame]:
+        self._brutes = []
         if mois is None:
             mois = list(range(1, 13))
         else:
@@ -32,10 +72,37 @@ class Station:
         if self.station_id in STATIONS_ID:
             for year in years:
                 for moi in mois:
-                    self.data.append(pl.read_csv(path.join(PATH_DONNEES, f"{self.station_id}_{year}_{moi:02d}.csv")))
+                    self._brutes.append(
+                        pd.read_csv(
+                            path.join(PATH_DONNEES, f"{self.station_id}_{year}_{moi:02d}.csv"),
+                            dtype=SCHEMA_NUMERIQUE,
+                            encoding="utf-8-sig",
+                            encoding_errors="replace",
+                        )
+                    )
+        return self._brutes
 
-    def clean_data(self) -> pl.DataFrame:
-        return pl.DataFrame()
+    def clean_data(self) -> pd.DataFrame:
+        # Tri par date : shift(3) décale de 3 lignes, qui doivent être 3 heures.
+        self._data = (
+            pd.concat(self._brutes, ignore_index=True)[COLONNES_GARDEES]
+            .sort_values("Date/Time (LST)")
+            .reset_index(drop=True)
+        )
+        pression = self._data["Stn Press (kPa)"]
+        self._data["delta_pression3h"] = pression - pression.shift(3)
+        delta = self._data["delta_pression3h"]
+        tendance = pd.Series("stable", index=self._data.index, dtype="object")
+        tendance[delta > SEUIL_PRESSION_KPA] = "hausse"
+        tendance[delta < -SEUIL_PRESSION_KPA] = "baisse"
+        # pression manquante : on garde le manquant, l'imputation s'en occupe
+        tendance[delta.isna()] = None
+        self._data["tendance_pression"] = tendance
+        return self._data
+
+    def make_target(self) -> pd.DataFrame:
+        self._data = self.clean_data()[COLONNES_CIBLE_GARDEES]
+        return self._data
 
 
 if __name__ == "__main__":
@@ -43,3 +110,6 @@ if __name__ == "__main__":
     for station in STATIONS_ID:
         stations.append(Station(station, mois=list(range(1, 13)), years=[2025]))
     print("Tests Locaux Réussis")
+    for station in stations:
+        print(station.data.head(5))
+        print(station.data.columns)

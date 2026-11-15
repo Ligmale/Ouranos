@@ -7,7 +7,7 @@
 Squelette : chaque corps est à écrire par l'équipe.
 """
 
-import polars as pl
+import pandas as pd
 from abc import ABC, abstractmethod
 
 from station import Station
@@ -45,6 +45,7 @@ def saison(mois: int) -> str:
         case _:
             raise ValueError(f"Mois Invalide {mois}")
 
+
 def moment_journee(heure: int) -> str:
     """Donne le moment de la journée d'une heure.
 
@@ -52,8 +53,16 @@ def moment_journee(heure: int) -> str:
     Sortie : nom du moment (ex. nuit, matin…).
     Échec : heure hors de 0 à 23.
     """
-    # TODO : combien de moments, et où couper ? Penser à l'îlot de chaleur la nuit.
-    raise NotImplementedError
+    # Nuit 0-5, matin 6-10, après-midi 11-16, soir 17-23 (heure normale locale).
+    if heure < 0 or heure > 23:
+        raise ValueError(f"Heure invalide : {heure}")
+    if heure < 6:
+        return "nuit"
+    if heure < 11:
+        return "matin"
+    if heure < 17:
+        return "apres-midi"
+    return "soir"
 
 
 def direction_8_points(dizaines_degres: float | None) -> str | None:
@@ -72,7 +81,7 @@ def direction_8_points(dizaines_degres: float | None) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def apparier(mctavish: pl.DataFrame, reference: pl.DataFrame) -> pl.DataFrame:
+def apparier(mctavish: pd.DataFrame, reference: pd.DataFrame) -> pd.DataFrame:
     """Aligne McTavish et une station de référence à la même heure et calcule l'écart.
 
     Entrées :
@@ -83,13 +92,16 @@ def apparier(mctavish: pl.DataFrame, reference: pl.DataFrame) -> pl.DataFrame:
     """
     # TODO :
     # 1. renommer la température de McTavish (les deux tableaux ont « Temp (°C) ») ;
+    mctavish.assign(Temperature_Cible=mctavish["Temp (°C)"])
+    reference.assign(Temperature=reference["Temp (°C)"])
     # 2. jointure interne sur « Date/Time (LST) » ;
+    
     # 3. calculer l'écart ;
     # 4. retirer la température de McTavish (sinon fuite de la cible).
     raise NotImplementedError
 
 
-def ajouter_categories(tableau: pl.DataFrame) -> pl.DataFrame:
+def ajouter_categories(tableau: pd.DataFrame) -> pd.DataFrame:
     """Ajoute saison, moment de la journée et direction du vent en 8 points.
 
     Entrée : tableau avec « Date/Time (LST) » et « Wind Dir (10s deg) ».
@@ -101,7 +113,7 @@ def ajouter_categories(tableau: pl.DataFrame) -> pl.DataFrame:
     raise NotImplementedError
 
 
-def construire_tableau(mctavish: Station, references: list[Station]) -> pl.DataFrame:
+def construire_tableau(mctavish: Station, references: list[Station]) -> pd.DataFrame:
     """Construit le tableau final : une ligne par (heure, station de référence).
 
     Entrées : la station McTavish et la liste des stations de référence.

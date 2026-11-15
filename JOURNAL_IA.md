@@ -82,3 +82,64 @@ décision (gardé, modifié, rejeté).
   Signalé aussi : avant `clean_data()`, `station.data` est maintenant un DataFrame vide.
 - **Vérification faite :** `pyright src/station.py` passe de 1 erreur à 0 erreur.
 - **Décision :** _à compléter après relecture par l'équipe (gardé / modifié / rejeté)_
+
+## 9. Squelette de `src/donnees.py` (2026-11-03)
+
+- **Outil :** Claude Code (Claude Opus 5.5)
+- **Demandé :** où calculer l'écart de température (dans `Station` ou dans `donnees.py`), puis
+  un squelette de `src/donnees.py`.
+- **Réponse reçue :** l'écart va dans `donnees.py`, car il combine deux stations alors qu'une
+  `Station` ne connaît que ses propres données. Squelette sans logique (corps en
+  `raise NotImplementedError`), avec signatures typées, docstrings (entrées, sortie, cas
+  d'échec) et `TODO` sous forme de questions : conversions `saison`, `moment_journee`,
+  `direction_8_points` ; appariement `apparier` (jointure interne, renommer la température de
+  McTavish avant, la retirer après pour éviter la fuite), `ajouter_categories`,
+  `construire_tableau` ; classes `Variable` (abstraite), `VariableNumerique`,
+  `VariableCategorielle`. Signalé : `src/exceptions.py` reste à créer, et pytest devra ajouter
+  `src/` au chemin d'import.
+- **Vérification faite :** `pyright src/donnees.py` : 0 erreur.
+- **Décision :** _à compléter après relecture par l'équipe (gardé / modifié / rejeté)_
+
+## 10. Découpage de la journée : `moment_journee` (2026-11-05)
+
+- **Outil :** Claude Code (Claude Opus 5.5)
+- **Demandé :** est-il nécessaire de découper l'heure en périodes, puis terminer
+  `moment_journee` dans `src/donnees.py`.
+- **Réponse reçue :** le découpage est peu utile pour la forêt aléatoire, qui trouve seule ses
+  coupures sur l'heure brute (0 à 23), mais utile pour la régression linéaire (îlot de chaleur
+  non linéaire selon l'heure). Conseil : garder l'heure brute en numérique **et**
+  `moment_journee`, puis comparer la MAE chronologique avec et sans. Limite signalée : en heure
+  normale, le coucher du soleil varie d'environ 16 h (décembre) à 20 h (juin), donc une même
+  période ne correspond pas à la même situation selon la saison. Fonction terminée avec nos
+  bornes (nuit 0-5, matin 6-10, après-midi 11-16, soir 17-23, `ValueError` hors de 0 à 23).
+- **Vérification faite :** fonction appelée sur chaque heure de transition (0, 5, 6, 10, 11,
+  16, 17, 23) et sur −1 et 24 : résultats et erreurs attendus.
+- **Décision :** _à compléter après relecture par l'équipe (gardé / modifié / rejeté)_
+
+## 11. Tests de `moment_journee` (2026-11-05)
+
+- **Outil :** Claude Code (Claude Opus 5.5)
+- **Demandé :** écrire les tests de `moment_journee` dans `tests/test_donnees.py`.
+- **Réponse reçue :** 3 tests paramétrés, sans le décorateur `@A_ECRIRE` : une heure typique
+  par moment (3, 8, 14, 20), les bornes (0, 23 et chaque transition 5/6, 10/11, 16/17) et les
+  heures invalides (−1, 24) avec `pytest.raises(ValueError)` ; import de `moment_journee`
+  ajouté.
+- **Vérification faite :** `pytest tests/test_donnees.py -k moment_journee` : 14 cas réussis.
+- **Décision :** _à compléter après relecture par l'équipe (gardé / modifié / rejeté)_
+
+## 12. Passage de Polars à pandas (2026-11-14)
+
+- **Outil :** Claude Code (Claude Opus 5.5)
+- **Demandé :** convertir tout le code qui utilise Polars en pandas.
+- **Réponse reçue :** `src/station.py` réécrit avec pandas (`pd.read_csv` avec
+  `dtype=SCHEMA_NUMERIQUE` et `encoding="utf-8-sig"`, `pd.concat` + `sort_values` +
+  `reset_index`, `shift(3)` pour la tendance de pression, masques booléens pour
+  hausse/stable/baisse, manquant gardé si la pression manque) ; types et `.assign` dans
+  `src/donnees.py` ; `requirements.txt` (Polars retiré, `pandas==3.1.1`, `python-dateutil`,
+  `tzdata`) ; `DECISIONS.md` §8 et `CLAUDE.md` mis à jour. Signalé : les deux premières lignes
+  de `apparier` n'ont aucun effet (résultat non réassigné), et `station.py` lit un CSV entier à
+  l'import pour vérifier son existence (`os.path.exists` suffirait).
+- **Vérification faite :** `python src/station.py` passe ; `pytest` : 26 réussis, 28 ignorés ;
+  pour les 4 stations, le tableau pandas est identique à celui de l'ancienne logique Polars
+  (8 760 lignes × 11 colonnes, mêmes valeurs et mêmes tendances).
+- **Décision :** _à compléter après relecture par l'équipe (gardé / modifié / rejeté)_

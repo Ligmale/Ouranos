@@ -8,7 +8,7 @@ Données de test : tests/fake_donnees/ (10761 = McTavish, 51157 = YUL, 2025-01-0
 import pytest
 
 from abc import ABC, abstractmethod
-from donnees import saison
+from donnees import moment_journee, saison
 
 A_ECRIRE = pytest.mark.skip(reason="test à écrire")
 
@@ -52,23 +52,35 @@ def test_saison_mois_invalide(mois: int) -> None:
 # ---------------------------------------------------------------------------
 
 
-@A_ECRIRE
-def test_moment_journee() -> None:
-    # TODO : une heure typique par moment (selon les bornes choisies)
-    ...
+@pytest.mark.parametrize(
+    ("heure", "attendu"),
+    [(3, "nuit"), (8, "matin"), (14, "apres-midi"), (20, "soir")],
+)
+def test_moment_journee(heure: int, attendu: str) -> None:
+    assert moment_journee(heure) == attendu
 
 
-@A_ECRIRE
-def test_moment_journee_bornes() -> None:
-    # TODO : 0, 23 et les heures de transition entre deux moments
-    ...
+@pytest.mark.parametrize(
+    ("heure", "attendu"),
+    [
+        (0, "nuit"),
+        (5, "nuit"),
+        (6, "matin"),
+        (10, "matin"),
+        (11, "apres-midi"),
+        (16, "apres-midi"),
+        (17, "soir"),
+        (23, "soir"),
+    ],
+)
+def test_moment_journee_bornes(heure: int, attendu: str) -> None:
+    assert moment_journee(heure) == attendu
 
 
-@A_ECRIRE
 @pytest.mark.parametrize("heure", [-1, 24])
 def test_moment_journee_heure_invalide(heure: int) -> None:
-    # TODO : pytest.raises(...)
-    ...
+    with pytest.raises(ValueError):
+        moment_journee(heure)
 
 
 # ---------------------------------------------------------------------------
@@ -104,7 +116,7 @@ def test_direction_8_points_invalide(dizaines: float) -> None:
 # ---------------------------------------------------------------------------
 # apparier
 # (il faudra une fixture qui charge les faux CSV : rediriger station.PATH_DONNEES
-#  vers tests/fake_donnees/ avec monkeypatch, ou construire de petits pl.DataFrame à la main)
+#  vers tests/fake_donnees/ avec monkeypatch, ou construire de petits pd.DataFrame à la main)
 # ---------------------------------------------------------------------------
 
 
