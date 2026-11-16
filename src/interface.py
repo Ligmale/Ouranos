@@ -6,6 +6,7 @@ import pandas as pd
 import streamlit as st
 import matplotlib.pyplot as plt
 from exceptions import ModeleNonTrouveError
+from donnees import saison as calculer_saison, moment_journee
 
 #Configuration de la page
 st.set_page_config(page_title="Ouranos - Estimation de l'îlot de chaleur urbain", layout="wide")
@@ -53,25 +54,9 @@ date_mesure = st.sidebar.date_input("Date")
 heure_mesure = st.sidebar.slider("Heure (HNL)", 0, 23, 23)
 
 #Détermination automatique de la saison et du moment de la journée
-mois = date_mesure.month
-
-if mois in [12, 1, 2]:
-    saison = "hiver"
-elif mois in [3, 4, 5]:
-    saison = "printemps"
-elif mois in [6, 7, 8]:
-    saison = "été"
-else:
-    saison = "automne"
-
-if heure_mesure < 6:
-    moment = "nuit"
-elif heure_mesure < 12:
-    moment = "matin"
-elif heure_mesure < 18:
-    moment = "midi"
-else:
-    moment = "soir"
+#On réutilise les fonctions de donnees.py : mêmes catégories que celles vues à l'entraînement.
+saison = calculer_saison(date_mesure.month)
+moment = moment_journee(heure_mesure)
 
 st.sidebar.markdown(f"**Saison :** {saison} — **Moment :** {moment} *(calculés automatiquement)*")
 
@@ -84,7 +69,10 @@ vent = st.sidebar.number_input("Vent (km/h)", min_value=0, value=4)
 visibilite = st.sidebar.number_input("Visibilité (km)", min_value=0.0, value=24.0, format="%.1f")
 direction_vent = st.sidebar.selectbox("Direction du vent", ["N", "NE", "E", "SE", "S", "SO", "O", "NO", "Inconnu"])
 
-tendance_pression = st.sidebar.radio("Tendance de la pression (3h)", ["Hausse", "Stable", "Baisse"], index=1)
+#Valeurs en minuscules comme dans station.py ; format_func ne change que l'affichage.
+tendance_pression = st.sidebar.radio(
+    "Tendance de la pression (3h)", ["hausse", "stable", "baisse"], index=1, format_func=str.capitalize
+)
 
 bouton_predire = st.sidebar.button("Prédire", type="primary")
 

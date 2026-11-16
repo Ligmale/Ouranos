@@ -4,6 +4,7 @@ import numpy as np
 import os 
 from modele import calculer_rmse_numpy, optimiser_seuil_prediction, entrainer_modele, sauvegarder_artefacts
 from exceptions import DonneeInvalideError
+from donnees import moment_journee, direction_8_points
 
 
 def test_calculer_rmse_numpy():
@@ -32,13 +33,15 @@ def test_optimiser_seuil_prediction():
     assert isinstance(decalage, float)
     assert pytest.approx(decalage, abs=0.01) == 1.0
 
-def test_entrainer_modele_avec_csv_reels():
+def test_entrainer_modele_avec_csv_reels(tmp_path):
     """Teste l'entraînement complet, la vérification numpy/scipy et la sauvegarde à partir des vrais CSV."""
     # 1. Chargement et préparation des données des deux stations
-    df_mct = pd.read_csv("fake_donnees/10761_2025_01.csv")[["Date/Time (LST)", "Temp (°C)"]].rename(
+    # Chemin relatif au fichier de test : marche peu importe d'où pytest est lancé (CI = racine).
+    dossier_donnees = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fake_donnees")
+    df_mct = pd.read_csv(os.path.join(dossier_donnees, "10761_2025_01.csv"))[["Date/Time (LST)", "Temp (°C)"]].rename(
         columns={"Temp (°C)": "Temp_mct"}
     )
-    df_yul = pd.read_csv("fake_donnees/51157_2025_01.csv")
+    df_yul = pd.read_csv(os.path.join(dossier_donnees, "51157_2025_01.csv"))
 
     # Fusion sur la date/heure
     df = pd.merge(df_yul, df_mct, on="Date/Time (LST)", how="inner")
@@ -50,14 +53,11 @@ def test_entrainer_modele_avec_csv_reels():
     # Calcul de l'écart (Référence - McTavish)
     df["ecart"] = df[col_temp_yul] - df[col_temp_mct]
 
+    # Mêmes conversions que le vrai tableau (donnees.py), pour avoir les mêmes catégories.
     heures = pd.to_datetime(df["Date/Time (LST)"]).dt.hour
-    df["moment_journee"] = np.where(
-        heures < 6, "nuit", np.where(heures < 12, "matin", np.where(heures < 18, "midi", "soir"))
-    )
-
-    directions = ["N", "NE", "E", "SE", "S", "SO", "O", "NO"]
+    df["moment_journee"] = heures.apply(moment_journee)
     df["direction_8_points"] = df["Wind Dir (10s deg)"].apply(
-        lambda d: "Inconnu" if pd.isna(d) else directions[int((d * 10 + 22.5) / 45) % 8]
+        lambda d: None if pd.isna(d) else direction_8_points(d)
     )
 
     df = df.dropna(subset=[col_temp_yul, "Rel Hum (%)", "Wind Spd (km/h)", "ecart"])
@@ -83,7 +83,8 @@ def test_entrainer_modele_avec_csv_reels():
     assert metadonnees["type_modele"] == "MLPRegressor (Reseau de neurones)"
 
     #Test de la sauvegarde des artefacts
-    dossier_test = str("modeles_test")
+    # tmp_path : dossier temporaire de pytest, rien n'est écrit dans le dépôt.
+    dossier_test = str(tmp_path / "modeles_test")
     sauvegarder_artefacts(artefacts, metadonnees, dossier_modeles=dossier_test)
 
     assert os.path.exists(os.path.join(dossier_test, "modele_ouranos.pkl"))
