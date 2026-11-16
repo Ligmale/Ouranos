@@ -53,8 +53,8 @@ def entrainer_modele(df: pd.DataFrame, features_numeriques: list[str], features_
         raise DonneeInvalideError("Le dataframe fourni est vide...")
 
     #On regroupe les caractéristiques numériques et catégorielles + on ajoute la colonne cible à la fin
-    colonnes_requises = features_categoriques + features_numeriques
-    colonnes_requises.append(colonnes_requises)
+    colonnes_requises = list(features_categoriques) + list(features_numeriques)
+    colonnes_requises.append(colonne_cible)
 
     if not set(colonnes_requises).issubset(df.columns):
         raise DonneeInvalideError("Des colonnes requises sont manquantes dans le dataframe...")
@@ -100,7 +100,7 @@ def entrainer_modele(df: pd.DataFrame, features_numeriques: list[str], features_
 
     #Moyenne de l'entraînement (référence simple)
     y_ref = np.full_like(y_test, fill_value=y_entraine.mean())
-    rmse_ref = calculer_rmse_numpy(y_entraine.to_numpy(),y_ref)
+    rmse_ref = calculer_rmse_numpy(y_test.to_numpy(),y_ref)
 
     metriques = {
         "rmse_modele":rmse_scikit, 
