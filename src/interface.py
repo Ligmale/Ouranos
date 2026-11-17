@@ -9,6 +9,7 @@ import os
 from datetime import datetime
 
 import matplotlib.pyplot as plt
+from matplotlib import font_manager
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -18,6 +19,25 @@ from exceptions import DonneeInvalideError, ErreurPredictionError, ModeleNonTrou
 from modele import NUMERIQUES_FACULTATIVES, Prediction, Predicteur
 
 CHEMIN_HISTORIQUE = os.path.join("historique", "predictions.csv")
+CHEMIN_POLICE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "Inter.ttf")
+
+
+#Couleurs du thème sombre de Streamlit, reprises dans le graphique pour qu'il s'y fonde.
+FOND_SOMBRE = "#0E1117"
+TEXTE_CLAIR = "#FAFAFA"
+
+
+def configurer_matplotlib() -> None:
+    "Graphiques Matplotlib en mode sombre, dans la même police que l'interface (Inter) si présente."
+    plt.style.use("dark_background")
+    plt.rcParams.update({"figure.facecolor": FOND_SOMBRE, "axes.facecolor": FOND_SOMBRE,
+                         "savefig.facecolor": FOND_SOMBRE, "text.color": TEXTE_CLAIR})
+    if os.path.exists(CHEMIN_POLICE):
+        font_manager.fontManager.addfont(CHEMIN_POLICE)
+        plt.rcParams["font.family"] = "Inter"
+
+
+configurer_matplotlib()
 
 
 @st.cache_resource   #Le modèle est chargé une seule fois et gardé en mémoire vive (jamais réentraîné)
@@ -67,7 +87,7 @@ def lire_saisie(metadonnees: dict) -> tuple[dict, datetime, bool]:
     #Détermination automatique de la saison et du moment de la journée (même logique que l'entraînement)
     saison = calculer_saison(date_mesure.month)
     moment = moment_journee(heure_mesure)
-    st.sidebar.markdown(f"**Saison :** {saison} — **Moment :** {moment} *(calculés automatiquement)*")
+    st.sidebar.markdown(f"**Saison :** {NOMS_SAISONS.get(saison, saison)} — **Moment :** {moment} *(calculés automatiquement)*")
 
     #Saisie des variables numériques et catégorielles (limites et choix tirés du JSON)
     saisie: dict = {colonne: champ_numerique(numeriques, colonne, etiquette, defaut)
@@ -134,26 +154,65 @@ def enregistrer_historique(saisie: dict, date_heure: datetime, prediction: Predi
     df_hist.to_csv(CHEMIN_HISTORIQUE, index=False)
 
 
-def afficher_graphique(metadonnees: dict, station_ref: str, heure: int, ecart_pred: float) -> None:
-    "Graphique Matplotlib : écart moyen par heure à l'entraînement (tiré du JSON) et la prédiction."
-    st.markdown("Où se situe cette prédiction ?")
-    st.markdown(f"--Écart moyen selon l'heure - référence : {station_ref}--")
+#Codes de saison (donnees.saison, sans accent) → texte affiché.
+NOMS_SAISONS = {"hiver": "hiver", "printemps": "printemps", "ete": "été", "automne": "automne"}
 
-    fig, ax = plt.subplots(figsize=(10, 4))
-    heures_jour = np.arange(24)
-    courbe_moyenne = [np.nan if v is None else v for v in metadonnees["ecart_moyen_par_heure"][station_ref]]
 
-    ax.plot(heures_jour, courbe_moyenne, color="#1f77b4", linewidth=2.5, label="Moyenne historique (2025)")
-    ax.scatter([heure], [ecart_pred], color="red", s=120, zorder=5, label="Votre prédiction")
+def courbe_json(valeurs: list) -> list[float]:
+    "Liste du JSON → valeurs à tracer (None, heure sans donnée, devient NaN : trou dans la courbe)."
+    return [np.nan if v is None else v for v in valeurs]
 
+
+def preparer_axe_heures(ax, titre: str, etiquette_y: str) -> None:
+    "Mise en forme commune des deux sous-graphiques (axe des heures, grille, légende)."
+    ax.set_title(titre, fontsize=11)
     ax.set_xlabel("Heure (HNL)")
-    ax.set_ylabel("Écart (°C)")
+    ax.set_ylabel(etiquette_y)
     ax.set_xticks([0, 6, 12, 18, 23])
     ax.set_xticklabels(["0h", "6h", "12h", "18h", "23h"])
-    ax.grid(True, linestyle="--", alpha=0.5)
-    ax.legend(loc="upper left")
+    ax.grid(True, linestyle="--", alpha=0.25)
+    ax.legend(loc="best", frameon=False, fontsize=9)  # « best » : là où la légende cache le moins
 
+
+def afficher_graphique(metadonnees: dict, station_ref: str, date_heure: datetime, prediction: Prediction) -> None:
+    """Deux graphiques Matplotlib côte à côte (moyennes tirées du JSON, jamais des données) :
+    à gauche l'écart moyen selon l'heure, à droite les températures moyennes de la saison
+    à la référence et au centre-ville, avec la saisie et la prédiction en points."""
+    saison = calculer_saison(date_heure.month)
+    nom_saison = NOMS_SAISONS.get(saison, saison)
+    heure = date_heure.hour
+    heures_jour = np.arange(24)
+    st.markdown(f"**Où se situe cette prédiction ?** Référence : {station_ref}")
+
+    fig, (ax_ecart, ax_temp) = plt.subplots(1, 2, figsize=(13, 4.2))
+
+    #Gauche : écart moyen selon l'heure (toute l'année)
+    ecart_moyen = courbe_json(metadonnees["ecart_moyen_par_heure"][station_ref])
+    ax_ecart.plot(heures_jour, ecart_moyen, color="#4DA3FF", linewidth=2.5, label="Écart moyen (2025)")
+    ax_ecart.scatter([heure], [prediction.ecart], color="#FF4B4B", s=110, zorder=5, label="Écart prédit")
+    ax_ecart.axhline(0, color="#FAFAFA", linewidth=0.8, alpha=0.4)
+    preparer_axe_heures(ax_ecart, "Écart McTavish − référence", "Écart (°C)")
+
+    #Droite : températures moyennes de la saison de la date choisie
+    temperatures = metadonnees.get("temperatures_moyennes_par_heure", {}).get(station_ref, {}).get(saison)
+    if temperatures is None:
+        ax_temp.text(0.5, 0.5, "Températures historiques absentes du modèle :\nrelancer « python src/modele.py »",
+                     ha="center", va="center", transform=ax_temp.transAxes)
+        ax_temp.set_axis_off()
+    else:
+        ax_temp.plot(heures_jour, courbe_json(temperatures["reference"]), color="#4DA3FF", linewidth=2,
+                     label=f"Référence ({nom_saison}, moyenne)")
+        ax_temp.plot(heures_jour, courbe_json(temperatures["centre_ville"]), color="#FFA94D", linewidth=2,
+                     label=f"Centre-ville ({nom_saison}, moyenne)")
+        ax_temp.scatter([heure], [prediction.temperature_reference], color="#4DA3FF", edgecolor="#FAFAFA",
+                        s=90, zorder=5, label="Température saisie")
+        ax_temp.scatter([heure], [prediction.temperature_centre_ville], color="#FF4B4B", s=110, zorder=5,
+                        label="Centre-ville estimé")
+        preparer_axe_heures(ax_temp, f"Températures moyennes en {nom_saison}", "Température (°C)")
+
+    fig.tight_layout()  # évite de couper les titres des axes
     st.pyplot(fig)
+    plt.close(fig)  # libère la mémoire : Streamlit réexécute le script à chaque clic
 
 
 def afficher_historique() -> None:
@@ -183,6 +242,7 @@ def afficher_application() -> None:
         raise  # jamais atteint : st.stop() arrête le script (indique à Pyright que la suite est sûre)
 
     metadonnees = predicteur.metadonnees
+    st.caption(f"Modèle : {metadonnees['type_modele']} — erreur typique (RMSE) ± {predicteur.rmse:.1f} °C")
     saisie, date_heure, bouton_predire = lire_saisie(metadonnees)
 
     if bouton_predire:
@@ -196,7 +256,7 @@ def afficher_application() -> None:
 
             afficher_resultat(saisie["Station Name"], prediction, predicteur.rmse)
             enregistrer_historique(saisie, date_heure, prediction)
-            afficher_graphique(metadonnees, saisie["Station Name"], date_heure.hour, prediction.ecart)
+            afficher_graphique(metadonnees, saisie["Station Name"], date_heure, prediction)
         except (DonneeInvalideError, ErreurPredictionError) as e:
             st.error(f"Prédiction impossible : {e}")
 

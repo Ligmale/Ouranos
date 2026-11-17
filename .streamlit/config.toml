@@ -1,0 +1,20 @@
+# Configuration Streamlit, lue quand on lance « streamlit run src/main.py » depuis la racine.
+
+[server]
+# Sert les fichiers de src/static/ (la police) : l'application marche sans réseau.
+enableStaticServing = true
+
+[theme]
+# Mode sombre imposé, quel que soit le réglage du navigateur.
+base = "dark"
+# Inter : police sans empattement conçue pour les écrans, chiffres et accents lisibles.
+# Licence SIL Open Font License 1.1 (src/static/Inter-OFL.txt).
+font = "Inter"
+headingFont = "Inter"
+metricValueFontWeight = 600
+
+[[theme.fontFaces]]
+family = "Inter"
+url = "app/static/Inter.ttf"
+weight = "100 900"   # police variable : un seul fichier pour toutes les graisses
+style = "normal"
