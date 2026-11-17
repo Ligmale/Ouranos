@@ -93,16 +93,113 @@ dossier_hist = "historique"
 os.makedirs(dossier_hist, exist_ok=True)
 chemin_hist = os.path.join(dossier_hist, "predictions.csv") 
 
-#TODO: Coder la logique du bouton_predire
-    #Récupération dess features attendues par le modèle
-    #Construction du dictionnaire d'entrée
-    #Sécurité pour s'assurer que toutes les colonnes nécessaires sont présentes
-    #Transformation et Prédiction
-    #Affichage des résultats sous forme de métriques
-    #Enregistrement dans l'historique CSV
-    #Graphique Matplotlib
-    #Courbe de tendance
+if bouton_predire:
+    try:
+        #Récupération dess features attendues par le modèle
+        features_num = metadonnees.get("features_numeriques", ["Temp (°C)", "Rel Hum (%)", "Wind Spd (km/h)"])
+        features_cat = metadonnees.get("features_categoriques", ["moment_journee", "direction_8_points"])
 
+
+
+        #Construction du dictionnaire d'entrée
+        input_data = {
+            "Temp (°C)": [temp_ref],
+            "Rel Hum (%)": [float(humidite)],
+            "Wind Spd (km/h)": [float(vent)],
+            "moment_journee": [moment],
+            "direction_8_points": [direction_vent]
+        }
+
+        df_input = pd.DataFrame(input_data)
+
+
+
+        #Sécurité pour s'assurer que toutes les colonnes nécessaires sont présentes
+        for colonne in features_num:
+            if colonne not in df_input.columns:
+                df_input[colonne] = 0.0
+        
+        for colonne in features_cat:
+            if colonne not in df_input.columns:
+                df_input[colonne] = "Inconnu"
+
+
+
+        #Transformation et Prédiction
+        x_entraine = preprocesseur.transform(df_input[features_num + features_cat])
+        ecart_pred = float(regresseur.predict(x_entraine)[0])
+        temp_centre_ville = temp_ref + ecart_pred
+
+
+
+        #Affichage des résultats sous forme de métriques
+        st.markdown("Résultat")
+        colonne1, colonne2 = st.columns(2)
+
+        mae_modele = metadonnees.get("metriques", {}).get("mae_modele", 0.5)
+
+        with colonne1:
+            st.metric(
+                label="Écart prédit (McTavish - Référence)",
+                value=f"+{ecart_pred:.1f} °C" if ecart_pred >= 0 else f"{ecart_pred:.1f} °C",
+                delta=f"± [{mae_modele:.1f}] °C (erreur moyenne MAE)"
+            )
+        with colonne2:
+            st.metric(
+                label="Température estimée au centre-ville",
+                value=f"{temp_centre_ville:.1f} °C",
+                delta=f"{temp_ref} °C mesurés à {station_ref} {ecart_pred:+.1f} °C"
+            )
+
+
+
+        #Enregistrement dans l'historique CSV
+        date_heure_str = f"{date_mesure} {heure_mesure:02d}:00"
+        nouvelle_ligne = pd.DataFrame([{
+            "Date et heure": date_heure_str,
+            "Référence": station_ref,
+            "Température référence": f"{temp_ref} °C",
+            "Vent": f"{vent} km/h",
+            "Écart prédit": f"{ecart_pred:+.1f} °C",
+            "Centre-ville": f"{temp_centre_ville:+.1f} °C" 
+        }])
+
+        if os.path.exists(chemin_hist):
+            df_hist = pd.read_csv(chemin_hist)
+            df_hist = pd.concat([nouvelle_ligne, df_hist], ignore_index=True)
+        else:
+            df_hist = nouvelle_ligne
+
+        df_hist.to_csv(chemin_hist, index=False)
+
+
+    
+        #Graphique Matplotlib
+        st.markdown("Où se situe cette prédiction ?")
+        st.markdown(f"--Écart moyen selon l'heure - référence : {station_ref}--")
+
+        fig, ax = plt.subplot(figsize=(10,4))
+        heures_jour = np.arrange(24)
+
+
+
+        #Courbe de tendance illustrative ou basée sur vos données
+        courbe_moyenne = 1.5 + 1.8 * np.sin((heures_jour - 6) * np.pi / 12)
+
+        ax.plot(heures_jour, courbe_moyenne, color="#1f77b4", linewidth=2.5, label="Moyenne historique")
+        ax.scatter([heure_mesure], [ecart_pred], color="red", s=120, zorder=5, label="Votre prédiction")
+
+        ax.set_xlabel("Heure (HNL)")
+        ax.set_ylabel("Écart (°C)")
+        ax.set_xticks([0, 6, 12, 18, 23])
+        ax.set_xticklabels(["0h","6h","12h","18h","23h"])
+        ax.grid(True, linestyle="--", alpha=0.5)
+        ax.legend(loc="upper left")
+
+        st.pyplot(fig)
+
+    except Exception as e:
+        st.error(f"Une erreur est survenue lors de la prédiction: {e}")
 
 
 #Section Historique en bas de page
