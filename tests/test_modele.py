@@ -1,101 +1,272 @@
-import pytest 
-import pandas as pd
+"""Tests de src/modele.py, sans réseau ni dossier donnees/.
+
+Le tableau est synthétique (graine fixe) : janvier et février 2025, deux stations de
+référence, un écart qui dépend de la station et du vent, plus du bruit.
+"""
+
+import json
+import os
+from datetime import datetime
+from typing import cast
+
 import numpy as np
-import os 
-from modele import calculer_rmse_numpy, optimiser_seuil_prediction, entrainer_modele, sauvegarder_artefacts
-from exceptions import DonneeInvalideError
-from donnees import moment_journee, direction_8_points
+import pandas as pd
+import pytest
+from sklearn.metrics import mean_squared_error
+
+from exceptions import DonneeInvalideError, ModeleNonTrouveError
+from modele import (
+    CARACTERISTIQUES_CATEGORIELLES,
+    CARACTERISTIQUES_NUMERIQUES,
+    VALEUR_INCONNUE,
+    calculer_rmse_numpy,
+    charger_artefacts,
+    chronometrer,
+    construire_pipeline,
+    decouper_chronologique,
+    ecart_moyen_par_heure,
+    entrainer,
+    hors_valeurs_vues,
+    predire,
+    preparer_saisie,
+    sauvegarder_artefacts,
+    scores_reference,
+)
+from sklearn.linear_model import LinearRegression
 
 
-def test_calculer_rmse_numpy():
-    "Vérifions le calcul manuel de la RMSE avec numpy"
-    y_reel = np.array([2.0,4.0,6.0])
-    y_predit = np.array([1.0,4.0,7.0])
+def faux_tableau(nb_jours: int = 59) -> pd.DataFrame:
+    """Tableau final synthétique : une ligne par (heure, station), du 1er janvier au 28 février."""
+    rng = np.random.default_rng(0)
+    heures = pd.date_range("2025-01-01 00:00", periods=nb_jours * 24, freq="h")
+    morceaux = []
+    for station, decalage in [("MONTREAL INTL A", 1.0), ("MONTREAL MIRABEL INTL A", 3.0)]:
+        n = len(heures)
+        vent = rng.uniform(0, 40, n)
+        direction = rng.choice(np.array(["N", "SO", "O", None], dtype=object), n)
+        morceaux.append(pd.DataFrame({
+            "Date/Time (LST)": heures.strftime("%Y-%m-%d %H:%M"),
+            "Station Name": station,
+            "Temp (°C)": rng.normal(-8, 5, n),
+            "Dew Point Temp (°C)": rng.normal(-12, 5, n),
+            "Rel Hum (%)": rng.uniform(40, 100, n),
+            "Stn Press (kPa)": rng.normal(101, 0.8, n),
+            "Wind Spd (km/h)": vent,
+            "Visibility (km)": np.where(rng.random(n) < 0.05, np.nan, 24.1),
+            "saison": "hiver",
+            "moment_journee": [("nuit" if h < 6 else "matin" if h < 11 else "apres-midi" if h < 17 else "soir")
+                               for h in heures.hour],
+            "direction_8_points": direction,
+            "tendance_pression": rng.choice(np.array(["hausse", "stable", "baisse", None], dtype=object), n),
+            "ecart": decalage + 2.0 * (vent < 10) + rng.normal(0, 0.3, n),
+        }))
+    return pd.concat(morceaux, ignore_index=True)
 
-    rmse = calculer_rmse_numpy(y_reel, y_predit)
-    assert isinstance(rmse, float)
-    assert pytest.approx(rmse, 0.001) == 0.81649
 
-def test_calculer_rmse_numpy_erreur_taille():
-    """Vérifie qu'une exception DonneeInvalideError est levée si les tableaux ont des tailles différentes."""
-    y_reel = np.array([1.0, 2.0])
-    y_predit = np.array([1.0])
+@pytest.fixture(scope="module")
+def modele_entraine() -> tuple:
+    """Entraîné une seule fois pour tout le module (quelques secondes)."""
+    return entrainer(faux_tableau())
 
+
+def saisie_valide() -> dict:
+    return {
+        "Temp (°C)": "-5,0",
+        "Dew Point Temp (°C)": -9.0,
+        "Rel Hum (%)": 73,
+        "Stn Press (kPa)": 101.0,
+        "Wind Spd (km/h)": 4,
+        "Visibility (km)": 24.1,
+        "Station Name": "MONTREAL INTL A",
+        "direction_8_points": VALEUR_INCONNUE,
+        "tendance_pression": "stable",
+    }
+
+
+# --- RMSE NumPy -------------------------------------------------------------
+
+
+def test_rmse_numpy_valeur_connue():
+    # erreurs 1, 0, -1 → racine de 2/3
+    assert calculer_rmse_numpy(np.array([2.0, 4.0, 6.0]), np.array([1.0, 4.0, 7.0])) == pytest.approx(0.816497, abs=1e-6)
+
+
+def test_rmse_numpy_egale_sklearn():
+    rng = np.random.default_rng(1)
+    y_reel, y_predit = rng.normal(size=200), rng.normal(size=200)
+    attendu = np.sqrt(mean_squared_error(y_reel, y_predit))
+    assert calculer_rmse_numpy(y_reel, y_predit) == pytest.approx(attendu)
+
+
+def test_rmse_numpy_parfaite_vaut_zero():
+    y = np.array([1.5, -2.0, 3.0])
+    assert calculer_rmse_numpy(y, y) == 0.0
+
+
+@pytest.mark.parametrize("y_reel, y_predit", [([1.0, 2.0], [1.0]), ([], [])])
+def test_rmse_numpy_erreurs(y_reel, y_predit):
     with pytest.raises(DonneeInvalideError):
-        calculer_rmse_numpy(y_reel, y_predit)
+        calculer_rmse_numpy(np.array(y_reel), np.array(y_predit))
 
-def test_optimiser_seuil_prediction():
-    """Vérifie l'optimisation du seuil avec scipy.optimize.minimize_scalar."""
-    y_reel = np.array([10.0, 20.0, 30.0])
-    y_predit = np.array([9.0, 18.0, 29.0])
-    
-    decalage = optimiser_seuil_prediction(y_reel, y_predit)
-    assert isinstance(decalage, float)
-    assert pytest.approx(decalage, abs=0.01) == 1.0
 
-def test_entrainer_modele_avec_csv_reels(tmp_path):
-    """Teste l'entraînement complet, la vérification numpy/scipy et la sauvegarde à partir des vrais CSV."""
-    # 1. Chargement et préparation des données des deux stations
-    # Chemin relatif au fichier de test : marche peu importe d'où pytest est lancé (CI = racine).
-    dossier_donnees = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fake_donnees")
-    df_mct = pd.read_csv(os.path.join(dossier_donnees, "10761_2025_01.csv"))[["Date/Time (LST)", "Temp (°C)"]].rename(
-        columns={"Temp (°C)": "Temp_mct"}
-    )
-    df_yul = pd.read_csv(os.path.join(dossier_donnees, "51157_2025_01.csv"))
+# --- Découpage chronologique ------------------------------------------------
 
-    # Fusion sur la date/heure
-    df = pd.merge(df_yul, df_mct, on="Date/Time (LST)", how="inner")
 
-    # Les noms exacts dans df sont "Temp (°C)" pour YUL et "Temp_mct" pour McTavish
-    col_temp_yul = "Temp (°C)"
-    col_temp_mct = "Temp_mct"
+def test_decoupage_chronologique_derniers_jours():
+    entrainement, test = decouper_chronologique(faux_tableau())
+    jours_test = pd.to_datetime(cast(pd.Series, test["Date/Time (LST)"]))
+    # janvier : 26 au 31 ; février (28 jours) : 23 au 28
+    assert set(jours_test.loc[jours_test.dt.month == 1].dt.day) == {26, 27, 28, 29, 30, 31}
+    assert set(jours_test.loc[jours_test.dt.month == 2].dt.day) == {23, 24, 25, 26, 27, 28}
+    assert len(entrainement) + len(test) == len(faux_tableau())
 
-    # Calcul de l'écart (Référence - McTavish)
-    df["ecart"] = df[col_temp_yul] - df[col_temp_mct]
 
-    # Mêmes conversions que le vrai tableau (donnees.py), pour avoir les mêmes catégories.
-    heures = pd.to_datetime(df["Date/Time (LST)"]).dt.hour
-    df["moment_journee"] = heures.apply(moment_journee)
-    df["direction_8_points"] = df["Wind Dir (10s deg)"].apply(
-        lambda d: None if pd.isna(d) else direction_8_points(d)
-    )
+def test_decoupage_chronologique_heure_jamais_des_deux_cotes():
+    entrainement, test = decouper_chronologique(faux_tableau())
+    assert set(entrainement["Date/Time (LST)"]).isdisjoint(test["Date/Time (LST)"])
 
-    df = df.dropna(subset=[col_temp_yul, "Rel Hum (%)", "Wind Spd (km/h)", "ecart"])
 
-    # Duplication pour obtenir suffisamment de lignes pour early_stopping=True de MLPRegressor
-    df_entrainement = pd.concat([df] * 5, ignore_index=True)
-
-    features_num = [col_temp_yul, "Rel Hum (%)", "Wind Spd (km/h)"]
-    features_cat = ["moment_journee", "direction_8_points"]
-
-    # 2. Entraînement du modèle
-    artefacts, metriques, metadonnees = entrainer_modele(
-        df=df_entrainement,
-        features_numeriques=features_num,
-        features_categoriques=features_cat,
-        colonne_cible="ecart",
-    )
-
-    assert "preprocesseur" in artefacts
-    assert "regresseur" in artefacts
-    assert pytest.approx(metriques["rmse_modele"], rel=1e-6) == metriques["rmse_numpy_verif"]
-    assert isinstance(metriques["biais_optimise_scipy"], float)
-    assert metadonnees["type_modele"] == "MLPRegressor (Reseau de neurones)"
-
-    #Test de la sauvegarde des artefacts
-    # tmp_path : dossier temporaire de pytest, rien n'est écrit dans le dépôt.
-    dossier_test = str(tmp_path / "modeles_test")
-    sauvegarder_artefacts(artefacts, metadonnees, dossier_modeles=dossier_test)
-
-    assert os.path.exists(os.path.join(dossier_test, "modele_ouranos.pkl"))
-    assert os.path.exists(os.path.join(dossier_test, "metadonnees.json"))
-
-def test_entrainer_modele_dataframe_vide():
-    """Vérifie que DonneeInvalideError est levée si le DataFrame est vide."""
+def test_decoupage_chronologique_cote_vide():
+    # 5 jours de janvier seulement : aucun jour après le 25 → test vide
     with pytest.raises(DonneeInvalideError):
-        entrainer_modele(
-            df=pd.DataFrame(),
-            features_numeriques=["Temp (°C)"],
-            features_categoriques=["moment_journee"],
-            colonne_cible="ecart",
-        )
+        decouper_chronologique(faux_tableau(nb_jours=5))
+
+
+# --- Références, écart moyen par heure ---------------------------------------
+
+
+def test_reference_par_station():
+    entrainement = pd.DataFrame({"Station Name": ["A", "A", "B"], "ecart": [1.0, 3.0, 5.0]})
+    test = pd.DataFrame({"Station Name": ["A", "B"], "ecart": [2.0, 5.0]})
+    scores = scores_reference(entrainement, test)
+    # par station : prédit 2 pour A et 5 pour B → parfait
+    assert scores["moyenne_par_station"]["rmse"] == pytest.approx(0.0)
+    # globale : prédit 3 partout → erreurs 1 et 2
+    assert scores["moyenne_globale"]["mae"] == pytest.approx(1.5)
+
+
+def test_ecart_moyen_par_heure():
+    tableau = pd.DataFrame({
+        "Date/Time (LST)": ["2025-01-01 00:00", "2025-01-02 00:00", "2025-01-01 05:00"],
+        "Station Name": ["A", "A", "A"],
+        "ecart": [1.0, 3.0, 4.0],
+    })
+    resultat = ecart_moyen_par_heure(tableau)["A"]
+    assert len(resultat) == 24
+    assert resultat[0] == pytest.approx(2.0)
+    assert resultat[5] == pytest.approx(4.0)
+    assert resultat[1] is None
+
+
+# --- Pipeline, entraînement, métadonnées ------------------------------------
+
+
+def test_pipeline_accepte_les_manquants():
+    tableau = faux_tableau(nb_jours=3)
+    tableau.loc[0, "Temp (°C)"] = np.nan
+    tableau.loc[1, "direction_8_points"] = None
+    x = tableau[CARACTERISTIQUES_NUMERIQUES + CARACTERISTIQUES_CATEGORIELLES]
+    pipeline = construire_pipeline(LinearRegression()).fit(x, tableau["ecart"])
+    assert np.isfinite(pipeline.predict(x)).all()
+
+
+def test_entrainer_metadonnees(modele_entraine):
+    _, meta = modele_entraine
+    assert meta["metrique_officielle"] == "rmse"
+    assert meta["rmse_officielle"] == meta["scores"]["chronologique"]["mlp"]["rmse"]
+    for decoupage in ("chronologique", "aleatoire"):
+        assert set(meta["scores"][decoupage]) == {
+            "moyenne_globale", "moyenne_par_station", "regression_lineaire", "mlp"
+        }
+    assert set(meta["importance_variables"]) == set(CARACTERISTIQUES_NUMERIQUES + CARACTERISTIQUES_CATEGORIELLES)
+    assert VALEUR_INCONNUE in meta["categorielles"]["direction_8_points"]
+    assert VALEUR_INCONNUE not in meta["categorielles"]["Station Name"]
+    json.dumps(meta)  # tout doit être sérialisable en JSON
+
+
+def test_mlp_bat_la_moyenne_globale(modele_entraine):
+    scores = modele_entraine[1]["scores"]["chronologique"]
+    assert scores["mlp"]["rmse"] < scores["moyenne_globale"]["rmse"]
+
+
+def test_entrainer_tableau_vide():
+    with pytest.raises(DonneeInvalideError):
+        entrainer(pd.DataFrame())
+
+
+def test_entrainer_colonne_manquante():
+    with pytest.raises(DonneeInvalideError):
+        entrainer(faux_tableau().drop(columns="Visibility (km)"))
+
+
+# --- Sauvegarde et chargement -----------------------------------------------
+
+
+def test_sauvegarde_puis_chargement(modele_entraine, tmp_path):
+    pipeline, meta = modele_entraine
+    chemin_modele, chemin_json = sauvegarder_artefacts(pipeline, meta, str(tmp_path))
+    assert os.path.exists(chemin_modele) and os.path.exists(chemin_json)
+    recharge, meta_rechargees = charger_artefacts(str(tmp_path))
+    assert meta_rechargees == meta
+    ligne = preparer_saisie(saisie_valide(), datetime(2025, 1, 15, 3), meta)
+    assert predire(recharge, ligne) == pytest.approx(predire(pipeline, ligne))
+
+
+def test_chargement_dossier_vide(tmp_path):
+    with pytest.raises(ModeleNonTrouveError):
+        charger_artefacts(str(tmp_path))
+
+
+# --- Saisie et prédiction ---------------------------------------------------
+
+
+def test_preparer_saisie_calcule_saison_et_moment(modele_entraine):
+    ligne = preparer_saisie(saisie_valide(), datetime(2025, 7, 10, 14), modele_entraine[1])
+    assert ligne.loc[0, "saison"] == "ete"
+    assert ligne.loc[0, "moment_journee"] == "apres-midi"
+    assert ligne.loc[0, "Temp (°C)"] == pytest.approx(-5.0)  # « -5,0 » accepté
+
+
+def test_predire_retourne_un_float(modele_entraine):
+    pipeline, meta = modele_entraine
+    ecart = predire(pipeline, preparer_saisie(saisie_valide(), datetime(2025, 1, 15, 3), meta))
+    assert isinstance(ecart, float)
+    assert -10 < ecart < 10
+
+
+@pytest.mark.parametrize("colonne, valeur", [
+    ("Rel Hum (%)", 150),             # hors limites physiques
+    ("Temp (°C)", "chaud"),            # non numérique
+    ("Wind Spd (km/h)", ""),           # vide
+    ("Station Name", "MCTAVISH"),      # catégorie non permise (et fuite)
+])
+def test_preparer_saisie_invalide(modele_entraine, colonne, valeur):
+    saisie = saisie_valide() | {colonne: valeur}
+    with pytest.raises(DonneeInvalideError):
+        preparer_saisie(saisie, datetime(2025, 1, 15, 3), modele_entraine[1])
+
+
+def test_preparer_saisie_champ_absent(modele_entraine):
+    saisie = saisie_valide()
+    del saisie["Visibility (km)"]
+    with pytest.raises(DonneeInvalideError):
+        preparer_saisie(saisie, datetime(2025, 1, 15, 3), modele_entraine[1])
+
+
+def test_hors_valeurs_vues(modele_entraine):
+    meta = modele_entraine[1]
+    ligne = preparer_saisie(saisie_valide() | {"Temp (°C)": 40}, datetime(2025, 1, 15, 3), meta)
+    assert hors_valeurs_vues(ligne, meta) == ["Temp (°C)"]
+
+
+# --- Décorateur -------------------------------------------------------------
+
+
+def test_chronometrer():
+    @chronometrer
+    def doubler(x: int) -> int:
+        return 2 * x
+
+    assert doubler(21) == 42
+    assert getattr(doubler, "derniere_duree") >= 0.0
+    assert doubler.__name__ == "doubler"
