@@ -84,25 +84,33 @@ def lire_saisie(metadonnees: dict) -> tuple[dict, datetime, bool]:
     return saisie, date_heure, bouton_predire
 
 
+def sans_moins_zero(valeur: float) -> float:
+    "Arrondit à 0,1 et transforme -0.0 en 0.0 (sinon l'affichage montre « -0.0 »)."
+    return round(valeur, 1) + 0.0
+
+
 def afficher_resultat(station_ref: str, prediction: Prediction, rmse_modele: float) -> None:
     "Affiche l'écart prédit et la température estimée au centre-ville, avec la RMSE comme marge."
     st.markdown("Résultat")
     colonne1, colonne2 = st.columns(2)
+    ecart = sans_moins_zero(prediction.ecart)
+    marge = f"± {rmse_modele:.1f} °C (erreur RMSE, découpage chronologique)"
 
     with colonne1:
         st.metric(
             label="Écart prédit (McTavish - Référence)",
-            value=f"{prediction.ecart:+.1f} °C",
-            delta=f"± {rmse_modele:.1f} °C (erreur RMSE, découpage chronologique)",
+            value=f"{ecart:+.1f} °C",
+            delta=marge,
             delta_color="off",
         )
     with colonne2:
         st.metric(
             label="Température estimée au centre-ville",
-            value=f"{prediction.temperature_centre_ville:.1f} °C",
-            delta=f"{prediction.temperature_reference:.1f} °C mesurés à {station_ref} {prediction.ecart:+.1f} °C",
+            value=f"{sans_moins_zero(prediction.temperature_centre_ville):.1f} °C",
+            delta=marge,
             delta_color="off",
         )
+        st.caption(f"{prediction.temperature_reference:.1f} °C mesurés à {station_ref} {ecart:+.1f} °C d'écart")
 
 
 def enregistrer_historique(saisie: dict, date_heure: datetime, prediction: Prediction) -> None:
