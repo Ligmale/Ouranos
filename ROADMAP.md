@@ -14,10 +14,10 @@ nettoyage, tendance de pression, cible côté McTavish).
 **Objectif :** obtenir le tableau final, une ligne par (heure, station de référence), avec la
 cible et toutes les caractéristiques prévues.
 
-- [ ] McTavish et chaque référence sont appariées à la même heure
-- [ ] La colonne d'écart existe ; les lignes sans cible sont retirées
-- [ ] Saison, moment de la journée et direction du vent en 8 points sont calculés
-- [ ] Le nombre de lignes final est dans les bornes de l'énoncé
+- [x] McTavish et chaque référence sont appariées à la même heure
+- [x] La colonne d'écart existe ; les lignes sans cible sont retirées
+- [x] Saison, moment de la journée et direction du vent en 8 points sont calculés
+- [x] Le nombre de lignes final est dans les bornes de l'énoncé
 
 **À se demander :**
 - Quel type de jointure, et que devient une heure présente d'un seul côté ?
@@ -28,10 +28,10 @@ cible et toutes les caractéristiques prévues.
 
 **Objectif :** des classes qui savent valider une saisie, réutilisables par l'interface.
 
-- [ ] Une classe parente abstraite et deux classes filles qui redéfinissent la validation
-- [ ] Au moins une exception personnalisée, levée avec un message clair
-- [ ] Au moins une méthode spéciale utile
-- [ ] Au moins 3 classes au total, avec encapsulation
+- [x] Une classe parente abstraite et deux classes filles qui redéfinissent la validation
+- [x] Au moins une exception personnalisée, levée avec un message clair
+- [x] Au moins une méthode spéciale utile
+- [x] Au moins 3 classes au total, avec encapsulation
 
 **À se demander :**
 - Qu'est-ce qu'une saisie invalide pour une variable numérique ? pour une catégorielle ?
@@ -52,13 +52,13 @@ cible et toutes les caractéristiques prévues.
 
 **Objectif :** un modèle entraîné, évalué honnêtement et sauvegardé avec ses métadonnées.
 
-- [ ] Des scores de référence simples pour savoir si le modèle apporte quelque chose
-- [ ] Un modèle simple et le modèle retenu, comparés
-- [ ] Les deux découpages (aléatoire exigé, chronologique officiel)
-- [ ] Prétraitement dans un pipeline, après le découpage
-- [ ] Une métrique calculée à la main avec NumPy
-- [ ] Importance des variables regardée
-- [ ] Modèle et métadonnées JSON sauvegardés dans `modeles/`
+- [x] Des scores de référence simples pour savoir si le modèle apporte quelque chose
+- [x] Un modèle simple et le modèle retenu, comparés
+- [x] Les deux découpages (aléatoire exigé, chronologique officiel)
+- [x] Prétraitement dans un pipeline, après le découpage
+- [x] Une métrique calculée à la main avec NumPy
+- [x] Importance des variables regardée
+- [x] Modèle et métadonnées JSON sauvegardés dans `modeles/`
 
 **À se demander :**
 - Comment garder les lignes d'une même heure du même côté du découpage ?
@@ -71,12 +71,12 @@ cible et toutes les caractéristiques prévues.
 **Objectif :** une application locale qui appelle la logique sans la contenir.
 
 - [ ] Un champ par variable, adapté à son type, construit depuis le JSON
-- [ ] Saisie invalide → message clair, jamais de traceback
-- [ ] Bouton « Prédire » avec un résultat lisible et une marge d'erreur
-- [ ] Un graphique Matplotlib dans l'interface
-- [ ] Historique des prédictions enregistré et consultable
+- [x] Saisie invalide → message clair, jamais de traceback
+- [x] Bouton « Prédire » avec un résultat lisible et une marge d'erreur
+- [x] Un graphique Matplotlib dans l'interface
+- [x] Historique des prédictions enregistré et consultable
 - [ ] `main.py` sert de point d'entrée
-- [ ] Maquette papier
+- [x] Maquette papier
 
 **À se demander :**
 - Quelles lignes de l'interface pourrait-on déplacer dans un module testable ?
@@ -87,10 +87,10 @@ cible et toutes les caractéristiques prévues.
 
 **Objectif :** prouver que la logique marche, sans réseau.
 
-- [ ] Un petit CSV d'exemple dans `tests/`
-- [ ] Au moins 8 tests : cas usuel, cas limite, cas d'erreur, flottants
+- [x] Un petit CSV d'exemple dans `tests/`
+- [x] Au moins 8 tests : cas usuel, cas limite, cas d'erreur, flottants
 - [ ] Couverture mesurée et notée dans le README
-- [ ] Un workflow GitHub Actions qui lance les tests à chaque push, vert
+- [x] Un workflow GitHub Actions qui lance les tests à chaque push, vert
 
 **À se demander :**
 - Quelles fonctions sont les plus risquées ? Les tester en premier.
@@ -102,7 +102,7 @@ cible et toutes les caractéristiques prévues.
 
 - [ ] Fonctions courtes, avec docstring (entrées, sortie, cas d'échec) et annotations de type
 - [ ] Les calculs retournent une valeur ; l'affichage est ailleurs
-- [ ] Aucun `except` nu
+- [x] Aucun `except` nu
 - [ ] Chemins avec `os`, existence vérifiée avant d'ouvrir, `with` partout
 - [ ] Au moins 4 modules + `main.py`
 - [ ] Au moins un outil du chapitre 7, expliqué en une phrase dans le README
