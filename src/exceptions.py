@@ -8,7 +8,7 @@ class DonneeInvalideError(OuranosError):
         super().__init__(message)
 
 class ModeleNonTrouveError(OuranosError):
-    "Levée lorsque le fichier du modèle entraîné (.plk) ou le fichier de métadonnées (JSON) est introuvable."
+    "Levée lorsque le fichier du modèle entraîné (.pkl) ou le fichier de métadonnées (JSON) est introuvable."
     def __init__(self, message = "Le modèle entraîné ou ses métadonnées sont introuvables.") -> None:
         super().__init__(message)
 

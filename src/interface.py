@@ -16,7 +16,7 @@ st.set_page_config(page_title="Ouranos - Estimation de l'îlot de chaleur urbain
 def charger_artefacts():
     dossier = "modeles" #Le dossier modèle contiendra les métadonnées traitées et enregistrées en plk/json
     chemin_modele = os.path.join(dossier, "modele_ouranos.pkl")
-    chemin_json = os.path.join(dossier,"metadonnes.json")
+    chemin_json = os.path.join(dossier,"metadonnees.json")
 
     if not os.path.exists(chemin_modele) or not os.path.exists(chemin_json):
         raise ModeleNonTrouveError("Le modèle entraîné ou le fichier de métadonnées est introuvable...")
@@ -49,7 +49,7 @@ regresseur = artefacts.get("regresseur")
 st.sidebar.header("Conditions mesurées")
 st.sidebar.markdown("À la station de référence choisie")
 
-station_ref = st.sidebar.selectbox("Station de rfrence", ["MONTREAL INTL A", "St-Hubert", "Mirabel", "McTavish"])
+station_ref = st.sidebar.selectbox("Station de référence", ["MONTREAL INTL A", "St-Hubert", "Mirabel", "McTavish"])
 date_mesure = st.sidebar.date_input("Date")
 heure_mesure = st.sidebar.slider("Heure (HNL)", 0, 23, 23)
 
@@ -83,7 +83,7 @@ chemin_hist = os.path.join(dossier_hist, "predictions.csv")
 
 if bouton_predire:
     try:
-        #Récupération dess features attendues par le modèle
+        #Récupération des features attendues par le modèle
         features_num = metadonnees.get("features_numeriques", ["Temp (°C)", "Rel Hum (%)", "Wind Spd (km/h)"])
         features_cat = metadonnees.get("features_categoriques", ["moment_journee", "direction_8_points"])
 
@@ -166,8 +166,8 @@ if bouton_predire:
         st.markdown("Où se situe cette prédiction ?")
         st.markdown(f"--Écart moyen selon l'heure - référence : {station_ref}--")
 
-        fig, ax = plt.subplot(figsize=(10,4))
-        heures_jour = np.arrange(24)
+        fig, ax = plt.subplots(figsize=(10,4))
+        heures_jour = np.arange(24)
 
 
 

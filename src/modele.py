@@ -23,7 +23,7 @@ def calculer_rmse_numpy(y_reel: np.ndarray, y_predit: np.ndarray) -> float:
 
 def fonction_cout(decalage:float, y_reel: np.ndarray, y_predit: np.ndarray) -> float:
     """
-    Fonction de coût auxiliare pour l'optimisation du seuil
+    Fonction de coût auxiliaire pour l'optimisation du seuil
     
     Sortie: la moyenne des erreurs absolues pour un décalage donné
     """
@@ -127,7 +127,7 @@ def entrainer_modele(df: pd.DataFrame, features_numeriques: list[str], features_
 
 
 def sauvegarder_artefacts(modele, metadonnees:dict, dossier_modeles = "modeles") -> None:
-    "Sauvegarde le modèle (.plk) et le JSON des métadonnées"
+    "Sauvegarde le modèle (.pkl) et le JSON des métadonnées"
     try:
         os.makedirs(dossier_modeles, exist_ok=True)
     except OSError as e:
