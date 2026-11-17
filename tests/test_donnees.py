@@ -1,16 +1,29 @@
 """Tests de src/donnees.py.
 
-Seuls les cas réussis de saison() sont écrits. Les autres tests sont des squelettes
-marqués « skip » : retirer le décorateur et écrire le corps au fur et à mesure.
 Données de test : tests/fake_donnees/ (10761 = McTavish, 51157 = YUL, 2025-01-01 00:00 à 11:00).
 """
 
+import os
+
+import pandas as pd
 import pytest
 
-from abc import ABC, abstractmethod
-from donnees import direction_8_points, moment_journee, saison
+import station
+from donnees import (
+    Variable,
+    VariableCategorielle,
+    VariableNumerique,
+    ajouter_categories,
+    apparier,
+    construire_tableau,
+    direction_8_points,
+    moment_journee,
+    saison,
+)
+from exceptions import DonneeInvalideError
+from station import Station
 
-A_ECRIRE = pytest.mark.skip(reason="test à écrire")
+DOSSIER_FAUX = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fake_donnees")
 
 
 # ---------------------------------------------------------------------------
@@ -39,10 +52,8 @@ def test_saison(mois: int, attendue: str) -> None:
     assert saison(mois) == attendue
 
 
-@A_ECRIRE
 @pytest.mark.parametrize("mois", [0, 13, -5])
 def test_saison_mois_invalide(mois: int) -> None:
-    # TODO : pytest.raises(ValueError)
     with pytest.raises(ValueError):
         saison(mois)
 
@@ -139,33 +150,62 @@ def test_direction_8_points_invalide(dizaines: float) -> None:
 
 # ---------------------------------------------------------------------------
 # apparier
-# (il faudra une fixture qui charge les faux CSV : rediriger station.PATH_DONNEES
-#  vers tests/fake_donnees/ avec monkeypatch, ou construire de petits pd.DataFrame à la main)
+# (les faux CSV sont chargés en redirigeant station.PATH_DONNEES vers tests/fake_donnees/)
 # ---------------------------------------------------------------------------
 
 
-@A_ECRIRE
-def test_apparier_colonne_ecart() -> None:
-    # TODO : à 00:00, écart McTavish − YUL = −3,5 − (−5,0) = 1,5 (pytest.approx)
-    ...
+@pytest.fixture
+def stations(monkeypatch: pytest.MonkeyPatch) -> tuple[Station, Station]:
+    """McTavish et YUL chargées depuis tests/fake_donnees/ (2025-01-01, 00:00 à 11:00)."""
+    monkeypatch.setattr(station, "PATH_DONNEES", DOSSIER_FAUX)
+    return Station(10761, mois=[1], years=[2025]), Station(51157, mois=[1], years=[2025])
 
 
-@A_ECRIRE
-def test_apparier_sans_temperature_mctavish() -> None:
-    # TODO : la température de McTavish ne doit plus être dans le résultat (fuite)
-    ...
+@pytest.fixture
+def tableau_apparie(stations: tuple[Station, Station]) -> pd.DataFrame:
+    mctavish, yul = stations
+    return apparier(mctavish.make_target(), yul.data)
 
 
-@A_ECRIRE
-def test_apparier_nombre_de_lignes() -> None:
-    # TODO : 12 heures communes ; 10 si on retire les lignes sans cible (05:00 et 08:00)
-    ...
+def test_apparier_colonne_ecart(tableau_apparie: pd.DataFrame) -> None:
+    # À 00:00, écart McTavish − YUL = −3,5 − (−5,0) = 1,5.
+    ligne = tableau_apparie[tableau_apparie["Date/Time (LST)"] == "2025-01-01 00:00"]
+    assert ligne["ecart"].iloc[0] == pytest.approx(1.5)
 
 
-@A_ECRIRE
-def test_apparier_colonne_absente() -> None:
-    # TODO : tableau sans « Date/Time (LST) » → pytest.raises(...)
-    ...
+def test_apparier_sans_temperature_mctavish(tableau_apparie: pd.DataFrame) -> None:
+    # Seules les colonnes de la référence + « ecart » restent (sinon fuite de la cible).
+    assert not any("mctavish" in c.lower() for c in tableau_apparie.columns)
+    assert list(tableau_apparie.columns) == list(station.COLONNES_GARDEES) + [
+        "delta_pression3h",
+        "tendance_pression",
+        "ecart",
+    ]
+    assert (tableau_apparie["Station Name"] == "MONTREAL INTL A").all()
+
+
+def test_apparier_nombre_de_lignes(tableau_apparie: pd.DataFrame) -> None:
+    # 12 heures communes ; 05:00 (YUL manquante) et 08:00 (McTavish manquante) n'ont pas de cible.
+    assert len(tableau_apparie) == 10
+    assert tableau_apparie["ecart"].notna().all()
+    heures = set(tableau_apparie["Date/Time (LST)"])
+    assert "2025-01-01 05:00" not in heures
+    assert "2025-01-01 08:00" not in heures
+
+
+def test_apparier_jointure_interne() -> None:
+    # Une heure présente d'un seul côté est retirée.
+    mctavish = pd.DataFrame({"Date/Time (LST)": ["h1", "h2"], "Temp (°C)": [1.0, 2.0]})
+    reference = pd.DataFrame({"Date/Time (LST)": ["h2", "h3"], "Temp (°C)": [0.5, 0.0]})
+    resultat = apparier(mctavish, reference)
+    assert resultat["Date/Time (LST)"].tolist() == ["h2"]
+    assert resultat["ecart"].iloc[0] == pytest.approx(1.5)
+
+
+def test_apparier_colonne_absente(stations: tuple[Station, Station]) -> None:
+    mctavish, yul = stations
+    with pytest.raises(ValueError, match="Date/Time"):
+        apparier(mctavish.make_target(), yul.data.drop(columns="Date/Time (LST)"))
 
 
 # ---------------------------------------------------------------------------
@@ -173,22 +213,28 @@ def test_apparier_colonne_absente() -> None:
 # ---------------------------------------------------------------------------
 
 
-@A_ECRIRE
-def test_ajouter_categories_colonnes() -> None:
-    # TODO : saison, moment de la journée et direction présents
-    ...
+def test_ajouter_categories_colonnes(tableau_apparie: pd.DataFrame) -> None:
+    resultat = ajouter_categories(tableau_apparie)
+    for colonne in ("saison", "moment_journee", "direction_8_points"):
+        assert colonne in resultat.columns
+    # Le tableau d'origine n'est pas modifié.
+    assert "saison" not in tableau_apparie.columns
 
 
-@A_ECRIRE
-def test_ajouter_categories_valeurs() -> None:
-    # TODO : janvier → hiver ; 27 → O ; moment de 00:00
-    ...
+def test_ajouter_categories_valeurs(tableau_apparie: pd.DataFrame) -> None:
+    resultat = ajouter_categories(tableau_apparie)
+    premiere = resultat.iloc[0]  # 2025-01-01 00:00, vent 27
+    assert premiere["saison"] == "hiver"
+    assert premiere["direction_8_points"] == "O"
+    assert premiere["moment_journee"] == "nuit"
+    # 03:00 : direction manquante à YUL → valeur manquante, sans erreur.
+    ligne_3h = resultat[resultat["Date/Time (LST)"] == "2025-01-01 03:00"]
+    assert pd.isna(ligne_3h["direction_8_points"].iloc[0])
 
 
-@A_ECRIRE
-def test_ajouter_categories_colonne_absente() -> None:
-    # TODO : pytest.raises(...)
-    ...
+def test_ajouter_categories_colonne_absente(tableau_apparie: pd.DataFrame) -> None:
+    with pytest.raises(ValueError, match="Wind Dir"):
+        ajouter_categories(tableau_apparie.drop(columns="Wind Dir (10s deg)"))
 
 
 # ---------------------------------------------------------------------------
@@ -196,16 +242,19 @@ def test_ajouter_categories_colonne_absente() -> None:
 # ---------------------------------------------------------------------------
 
 
-@A_ECRIRE
-def test_construire_tableau_une_ligne_par_heure_et_reference() -> None:
-    # TODO : avec une seule référence (YUL), le nombre de lignes de apparier()
-    ...
+def test_construire_tableau_une_ligne_par_heure_et_reference(stations: tuple[Station, Station]) -> None:
+    mctavish, yul = stations
+    tableau = construire_tableau(mctavish, [yul])
+    assert len(tableau) == len(apparier(mctavish.make_target(), yul.data))
+    # Deux fois la même référence : deux fois plus de lignes, empilées.
+    assert len(construire_tableau(mctavish, [yul, yul])) == 2 * len(tableau)
+    assert "saison" in tableau.columns
 
 
-@A_ECRIRE
-def test_construire_tableau_references_vide() -> None:
-    # TODO : liste vide → pytest.raises(...)
-    ...
+def test_construire_tableau_references_vide(stations: tuple[Station, Station]) -> None:
+    mctavish, _ = stations
+    with pytest.raises(ValueError, match="vide"):
+        construire_tableau(mctavish, [])
 
 
 # ---------------------------------------------------------------------------
@@ -213,29 +262,38 @@ def test_construire_tableau_references_vide() -> None:
 # ---------------------------------------------------------------------------
 
 
-@A_ECRIRE
-def test_variable_numerique_valeur_valide() -> None:
-    # TODO : "12.5" ou 12.5 → 12.5
-    ...
+@pytest.fixture
+def temperature() -> VariableNumerique:
+    return VariableNumerique("Temp (°C)", -50.0, 45.0)
 
 
-@A_ECRIRE
-def test_variable_numerique_bornes_incluses() -> None:
-    # TODO : minimum et maximum exacts acceptés
-    ...
+@pytest.mark.parametrize("saisie", ["12.5", 12.5, " 12.5 ", "12,5"])
+def test_variable_numerique_valeur_valide(temperature: VariableNumerique, saisie: object) -> None:
+    resultat = temperature.valider(saisie)
+    assert isinstance(resultat, float)
+    assert resultat == pytest.approx(12.5)
 
 
-@A_ECRIRE
-@pytest.mark.parametrize("saisie", ["", "abc", None])
-def test_variable_numerique_saisie_invalide(saisie: object) -> None:
-    # TODO : pytest.raises(DonneeInvalideError)
-    ...
+def test_variable_numerique_bornes_incluses(temperature: VariableNumerique) -> None:
+    assert temperature.valider(-50) == pytest.approx(-50.0)
+    assert temperature.valider(45) == pytest.approx(45.0)
 
 
-@A_ECRIRE
-def test_variable_numerique_hors_intervalle() -> None:
-    # TODO : pytest.raises(DonneeInvalideError)
-    ...
+@pytest.mark.parametrize("saisie", ["", "abc", None, "nan"])
+def test_variable_numerique_saisie_invalide(temperature: VariableNumerique, saisie: object) -> None:
+    with pytest.raises(DonneeInvalideError):
+        temperature.valider(saisie)
+
+
+@pytest.mark.parametrize("saisie", [-50.1, 45.0001, 1000])
+def test_variable_numerique_hors_intervalle(temperature: VariableNumerique, saisie: float) -> None:
+    with pytest.raises(DonneeInvalideError, match="intervalle"):
+        temperature.valider(saisie)
+
+
+def test_variable_numerique_bornes_inversees() -> None:
+    with pytest.raises(DonneeInvalideError):
+        VariableNumerique("x", 10, 0)
 
 
 # ---------------------------------------------------------------------------
@@ -243,15 +301,32 @@ def test_variable_numerique_hors_intervalle() -> None:
 # ---------------------------------------------------------------------------
 
 
-@A_ECRIRE
-def test_variable_categorielle_valeur_permise() -> None: ...
+@pytest.fixture
+def saison_var() -> VariableCategorielle:
+    return VariableCategorielle("saison", ["hiver", "printemps", "ete", "automne"])
 
 
-@A_ECRIRE
-@pytest.mark.parametrize("saisie", ["", "inconnue"])
-def test_variable_categorielle_saisie_invalide(saisie: object) -> None:
-    # TODO : pytest.raises(DonneeInvalideError)
-    ...
+def test_variable_categorielle_valeur_permise(saison_var: VariableCategorielle) -> None:
+    assert saison_var.valider("ete") == "ete"
+    assert saison_var.valider("  hiver ") == "hiver"
+
+
+@pytest.mark.parametrize("saisie", ["", "inconnue", None, "été"])
+def test_variable_categorielle_saisie_invalide(saison_var: VariableCategorielle, saisie: object) -> None:
+    with pytest.raises(DonneeInvalideError):
+        saison_var.valider(saisie)
+
+
+def test_variable_categorielle_encapsulation(saison_var: VariableCategorielle) -> None:
+    # La propriété renvoie une copie : modifier la liste ne change pas la variable.
+    saison_var.valeurs_permises.append("mousson")
+    with pytest.raises(DonneeInvalideError):
+        saison_var.valider("mousson")
+
+
+def test_variable_categorielle_liste_vide() -> None:
+    with pytest.raises(DonneeInvalideError):
+        VariableCategorielle("saison", [])
 
 
 # ---------------------------------------------------------------------------
@@ -259,13 +334,16 @@ def test_variable_categorielle_saisie_invalide(saisie: object) -> None:
 # ---------------------------------------------------------------------------
 
 
-@A_ECRIRE
 def test_variable_non_instanciable() -> None:
-    # TODO : Variable("x") → pytest.raises(TypeError)
-    ...
+    with pytest.raises(TypeError):
+        Variable("x")  # type: ignore[abstract]
 
 
-@A_ECRIRE
-def test_variable_methode_speciale() -> None:
-    # TODO : __repr__ / __str__ / __eq__ selon celle choisie
-    ...
+def test_variable_nom_vide() -> None:
+    with pytest.raises(DonneeInvalideError):
+        VariableCategorielle("  ", ["a"])
+
+
+def test_variable_methode_speciale(temperature: VariableNumerique, saison_var: VariableCategorielle) -> None:
+    assert repr(temperature) == "VariableNumerique('Temp (°C)', -50.0, 45.0)"
+    assert repr(saison_var) == "VariableCategorielle('saison', ['hiver', 'printemps', 'ete', 'automne'])"
