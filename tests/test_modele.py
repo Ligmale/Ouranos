@@ -19,6 +19,7 @@ from exceptions import DonneeInvalideError, ModeleNonTrouveError
 from modele import (
     CARACTERISTIQUES_CATEGORIELLES,
     CARACTERISTIQUES_NUMERIQUES,
+    MODELE_RETENU,
     VALEUR_INCONNUE,
     calculer_rmse_numpy,
     Predicteur,
@@ -29,6 +30,7 @@ from modele import (
     entrainer,
     preparer_saisie,
     sauvegarder_artefacts,
+    temperatures_moyennes_par_heure,
     scores_reference,
 )
 from sklearn.linear_model import LinearRegression
@@ -157,6 +159,22 @@ def test_ecart_moyen_par_heure():
     assert resultat[1] is None
 
 
+def test_temperatures_moyennes_par_heure():
+    tableau = pd.DataFrame({
+        "Date/Time (LST)": ["2025-01-01 00:00", "2025-01-02 00:00", "2025-07-01 00:00"],
+        "Station Name": ["A", "A", "A"],
+        "saison": ["hiver", "hiver", "ete"],
+        "Temp (°C)": [-10.0, -6.0, 20.0],
+        "ecart": [1.0, 3.0, 0.5],
+    })
+    resultat = temperatures_moyennes_par_heure(tableau)["A"]
+    assert resultat["hiver"]["reference"][0] == pytest.approx(-8.0)
+    assert resultat["hiver"]["centre_ville"][0] == pytest.approx(-6.0)  # (-9 + -3) / 2
+    assert resultat["ete"]["centre_ville"][0] == pytest.approx(20.5)
+    assert resultat["ete"]["reference"][1] is None
+    assert set(resultat) == {"hiver", "ete"}
+
+
 # --- Pipeline, entraînement, métadonnées ------------------------------------
 
 
@@ -172,20 +190,24 @@ def test_pipeline_accepte_les_manquants():
 def test_entrainer_metadonnees(modele_entraine):
     _, meta = modele_entraine
     assert meta["metrique_officielle"] == "rmse"
-    assert meta["rmse_officielle"] == meta["scores"]["chronologique"]["mlp"]["rmse"]
+    assert meta["modele_retenu"] == MODELE_RETENU == "regression_lineaire"
+    assert meta["rmse_officielle"] == meta["scores"]["chronologique"]["regression_lineaire"]["rmse"]
     for decoupage in ("chronologique", "aleatoire"):
         assert set(meta["scores"][decoupage]) == {
             "moyenne_globale", "moyenne_par_station", "regression_lineaire", "mlp"
         }
-    assert set(meta["importance_variables"]) == set(CARACTERISTIQUES_NUMERIQUES + CARACTERISTIQUES_CATEGORIELLES)
+    for nom in ("regression_lineaire", "mlp"):
+        assert set(meta["importance_variables"][nom]) == set(CARACTERISTIQUES_NUMERIQUES + CARACTERISTIQUES_CATEGORIELLES)
     assert VALEUR_INCONNUE in meta["categorielles"]["direction_8_points"]
+    assert len(meta["temperatures_moyennes_par_heure"]["MONTREAL INTL A"]["hiver"]["centre_ville"]) == 24
     assert VALEUR_INCONNUE not in meta["categorielles"]["Station Name"]
     json.dumps(meta)  # tout doit être sérialisable en JSON
 
 
-def test_mlp_bat_la_moyenne_globale(modele_entraine):
+def test_modeles_battent_la_moyenne_globale(modele_entraine):
     scores = modele_entraine[1]["scores"]["chronologique"]
-    assert scores["mlp"]["rmse"] < scores["moyenne_globale"]["rmse"]
+    for nom in ("regression_lineaire", "mlp"):
+        assert scores[nom]["rmse"] < scores["moyenne_globale"]["rmse"]
 
 
 def test_entrainer_tableau_vide():
@@ -202,13 +224,16 @@ def test_entrainer_colonne_manquante():
 
 
 def test_sauvegarde_puis_chargement(modele_entraine, tmp_path):
-    pipeline, meta = modele_entraine
-    chemin_modele, chemin_json = sauvegarder_artefacts(pipeline, meta, str(tmp_path))
-    assert os.path.exists(chemin_modele) and os.path.exists(chemin_json)
-    recharge = Predicteur.depuis_dossier(str(tmp_path))
+    pipelines, meta = modele_entraine
+    chemins = sauvegarder_artefacts(pipelines, meta, str(tmp_path))
+    # un fichier par modèle + le JSON
+    assert [os.path.basename(c) for c in chemins] == ["regression_lineaire.joblib", "mlp.joblib", "metadonnees.json"]
+    assert all(os.path.exists(c) for c in chemins)
+    recharge = Predicteur.depuis_dossier(str(tmp_path))  # charge le modèle retenu
     assert recharge.metadonnees == meta
     date = datetime(2025, 1, 15, 3)
-    assert recharge.predire(saisie_valide(), date).ecart == pytest.approx(Predicteur(pipeline, meta).predire(saisie_valide(), date).ecart)
+    attendu = Predicteur(pipelines[MODELE_RETENU], meta).predire(saisie_valide(), date).ecart
+    assert recharge.predire(saisie_valide(), date).ecart == pytest.approx(attendu)
 
 
 def test_chargement_dossier_vide(tmp_path):
@@ -221,7 +246,8 @@ def test_chargement_dossier_vide(tmp_path):
 
 @pytest.fixture(scope="module")
 def predicteur(modele_entraine) -> Predicteur:
-    return Predicteur(*modele_entraine)
+    pipelines, meta = modele_entraine
+    return Predicteur(pipelines[MODELE_RETENU], meta)
 
 
 def test_predicteur_contient_les_variables(predicteur):

@@ -75,7 +75,11 @@ JOURS_TEST_PAR_MOIS = 6
 GRAINE = 42
 
 DOSSIER_MODELES = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "modeles"))
-NOM_MODELE = "modele_ouranos.joblib"
+# Les deux modèles sont sauvegardés ; l'interface utilise le modèle retenu. L'énoncé limite
+# le modèle à une régression linéaire/logistique, des k plus proches voisins, un arbre ou une
+# forêt, et exclut l'apprentissage profond : le MLP n'est gardé qu'en comparaison.
+MODELE_RETENU = "regression_lineaire"
+MODELES = ["regression_lineaire", "mlp"]
 NOM_METADONNEES = "metadonnees.json"
 
 
@@ -338,7 +342,44 @@ def ecart_moyen_par_heure(tableau: pd.DataFrame) -> dict[str, list[float | None]
     moyennes = moyennes.reindex(columns=range(24))
     resultat: dict[str, list[float | None]] = {}
     for station, par_heure in moyennes.iterrows():
-        resultat[str(station)] = [None if pd.isna(v) else round(float(v), 3) for v in par_heure]
+        resultat[str(station)] = en_liste_json(par_heure)
+    return resultat
+
+
+def en_liste_json(par_heure: pd.Series) -> list[float | None]:
+    """Convertit 24 moyennes en liste pour le JSON : arrondies à 0,001, None si manquantes.
+
+    Entrée : une ligne de moyennes (une valeur par heure).
+    Sortie : la liste des valeurs.
+    """
+    return [None if pd.isna(v) else round(float(v), 3) for v in par_heure]
+
+
+def temperatures_moyennes_par_heure(tableau: pd.DataFrame) -> dict[str, dict[str, dict[str, list[float | None]]]]:
+    """Températures moyennes pour chaque heure, par station de référence et par saison.
+
+    Par saison : une moyenne sur l'année mélangerait l'hiver et l'été. La température au
+    centre-ville est retrouvée par température de la référence + écart.
+
+    Entrée : un tableau avec la date, « Station Name », « saison », « Temp (°C) » et la cible.
+    Sortie : {station: {saison: {"reference": 24 valeurs, "centre_ville": 24 valeurs}}},
+        None pour une heure sans donnée.
+    Échec : DonneeInvalideError si la date est absente.
+    """
+    if COLONNE_DATE not in tableau.columns:
+        raise DonneeInvalideError(f"Colonne « {COLONNE_DATE} » absente du tableau.")
+    avec_heure = tableau.assign(
+        heure=pd.to_datetime(tableau[COLONNE_DATE]).dt.hour,
+        temp_centre_ville=tableau["Temp (°C)"] + tableau[CIBLE],
+    )
+    resultat: dict[str, dict[str, dict[str, list[float | None]]]] = {}
+    for colonne, nom in [("Temp (°C)", "reference"), ("temp_centre_ville", "centre_ville")]:
+        moyennes = avec_heure.pivot_table(
+            index=["Station Name", "saison"], columns="heure", values=colonne, aggfunc="mean"
+        ).reindex(columns=range(24))
+        for cle, par_heure in moyennes.iterrows():
+            station, saison_ = cast(tuple, cle)
+            resultat.setdefault(str(station), {}).setdefault(str(saison_), {})[nom] = en_liste_json(par_heure)
     return resultat
 
 
@@ -379,56 +420,61 @@ def decrire_variables(entrainement: pd.DataFrame) -> dict[str, dict]:
 # ---------------------------------------------------------------------------
 
 
-def comparer_modeles(entrainement: pd.DataFrame, test: pd.DataFrame) -> tuple[Pipeline, dict]:
+def comparer_modeles(entrainement: pd.DataFrame, test: pd.DataFrame) -> tuple[dict[str, Pipeline], dict]:
     """Entraîne la régression linéaire et le MLP sur un découpage et les compare aux références.
 
     Entrées : tableaux d'entraînement et de test.
-    Sortie : (le Pipeline MLP entraîné, {nom: scores} pour les 4 approches).
+    Sortie : ({nom: Pipeline entraîné} pour les 2 modèles,
+              {nom: scores} pour les 4 approches, durée d'entraînement comprise pour les modèles).
     Échec : DonneeInvalideError si un tableau est vide.
     """
-    lineaire = ajuster(construire_pipeline(LinearRegression()), entrainement)
-    mlp = ajuster(construire_pipeline(creer_mlp()), entrainement)
-    scores = {
-        **scores_reference(entrainement, test),
-        "regression_lineaire": evaluer(lineaire, test),
-        "mlp": evaluer(mlp, test),
-    }
-    return mlp, scores
+    regresseurs = {"regression_lineaire": LinearRegression(), "mlp": creer_mlp()}
+    pipelines: dict[str, Pipeline] = {}
+    scores: dict[str, dict[str, float]] = scores_reference(entrainement, test)
+    for nom, regresseur in regresseurs.items():
+        pipelines[nom] = ajuster(construire_pipeline(regresseur), entrainement)
+        duree: float = getattr(ajuster, "derniere_duree")
+        scores[nom] = evaluer(pipelines[nom], test) | {"duree_entrainement_s": round(duree, 2)}
+    return pipelines, scores
 
 
-def entrainer(tableau: pd.DataFrame) -> tuple[Pipeline, dict]:
+def entrainer(tableau: pd.DataFrame) -> tuple[dict[str, Pipeline], dict]:
     """Entraîne, évalue sur les deux découpages et prépare les métadonnées.
 
-    Le modèle retourné est le MLP entraîné sur l'entraînement chronologique : la RMSE
-    officielle (chronologique) décrit exactement ce modèle.
+    Les modèles retournés sont ceux entraînés sur l'entraînement chronologique : la RMSE
+    officielle (chronologique, modèle retenu) décrit exactement le modèle de l'interface.
 
     Entrée : le tableau final (sortie de donnees.construire_tableau).
-    Sortie : (Pipeline MLP entraîné, métadonnées prêtes pour le JSON).
+    Sortie : ({nom: Pipeline entraîné} pour les 2 modèles, métadonnées prêtes pour le JSON).
     Échec : DonneeInvalideError si le tableau est vide, incomplet ou mal découpé.
     """
     verifier_tableau(tableau)
     _, scores_aleatoire = comparer_modeles(*decouper_aleatoire(tableau))
     entrainement, test = decouper_chronologique(tableau)
-    mlp, scores_chrono = comparer_modeles(entrainement, test)
-    duree: float = getattr(ajuster, "derniere_duree")
+    pipelines, scores_chrono = comparer_modeles(entrainement, test)
 
     metadonnees = {
-        "type_modele": "MLPRegressor (réseau de neurones), hidden_layer_sizes=(50, 25)",
+        "modele_retenu": MODELE_RETENU,
+        "type_modele": "Régression linéaire (LinearRegression)",
+        "modeles_compares": {
+            "regression_lineaire": "Régression linéaire (LinearRegression), retenue",
+            "mlp": "Réseau de neurones (MLPRegressor, couches 50 et 25), en comparaison seulement",
+        },
         "date_entrainement": datetime.now().isoformat(timespec="seconds"),
-        "duree_entrainement_s": round(duree, 2),
         "cible": CIBLE,
         "caracteristiques_numeriques": CARACTERISTIQUES_NUMERIQUES,
         "caracteristiques_categorielles": CARACTERISTIQUES_CATEGORIELLES,
         "valeur_inconnue": VALEUR_INCONNUE,
         **decrire_variables(entrainement),
         "metrique_officielle": "rmse",
-        "rmse_officielle": scores_chrono["mlp"]["rmse"],
+        "rmse_officielle": scores_chrono[MODELE_RETENU]["rmse"],
         "nb_lignes": {"entrainement": len(entrainement), "test": len(test)},
         "scores": {"chronologique": scores_chrono, "aleatoire": scores_aleatoire},
-        "importance_variables": importance_variables(mlp, test),
+        "importance_variables": {nom: importance_variables(pipeline, test) for nom, pipeline in pipelines.items()},
         "ecart_moyen_par_heure": ecart_moyen_par_heure(entrainement),
+        "temperatures_moyennes_par_heure": temperatures_moyennes_par_heure(entrainement),
     }
-    return mlp, metadonnees
+    return pipelines, metadonnees
 
 
 # ---------------------------------------------------------------------------
@@ -436,40 +482,47 @@ def entrainer(tableau: pd.DataFrame) -> tuple[Pipeline, dict]:
 # ---------------------------------------------------------------------------
 
 
-def sauvegarder_artefacts(
-    pipeline: Pipeline, metadonnees: dict, dossier: str = DOSSIER_MODELES
-) -> tuple[str, str]:
-    """Sauvegarde le Pipeline (joblib) et les métadonnées (JSON).
+def chemin_modele(dossier: str, nom: str) -> str:
+    """Chemin du fichier joblib d'un modèle (ex. modeles/regression_lineaire.joblib)."""
+    return os.path.join(dossier, f"{nom}.joblib")
 
-    Entrées : le Pipeline entraîné, les métadonnées, le dossier de destination.
-    Sortie : (chemin du modèle, chemin du JSON).
+
+def sauvegarder_artefacts(
+    pipelines: dict[str, Pipeline], metadonnees: dict, dossier: str = DOSSIER_MODELES
+) -> list[str]:
+    """Sauvegarde chaque Pipeline (joblib, un fichier par modèle) et les métadonnées (JSON).
+
+    Entrées : {nom: Pipeline entraîné}, les métadonnées, le dossier de destination.
+    Sortie : les chemins écrits (les modèles, puis le JSON).
     Échec : OSError si le dossier ne peut pas être créé ou écrit.
     """
     os.makedirs(dossier, exist_ok=True)
-    chemin_modele = os.path.join(dossier, NOM_MODELE)
-    chemin_json = os.path.join(dossier, NOM_METADONNEES)
-    with open(chemin_modele, "wb") as fichier:
-        joblib.dump(pipeline, fichier)
-    with open(chemin_json, "w", encoding="utf-8") as fichier:
+    chemins = []
+    for nom, pipeline in pipelines.items():
+        chemins.append(chemin_modele(dossier, nom))
+        with open(chemins[-1], "wb") as fichier:
+            joblib.dump(pipeline, fichier)
+    chemins.append(os.path.join(dossier, NOM_METADONNEES))
+    with open(chemins[-1], "w", encoding="utf-8") as fichier:
         json.dump(metadonnees, fichier, ensure_ascii=False, indent=2)
-    return chemin_modele, chemin_json
+    return chemins
 
 
-def charger_artefacts(dossier: str = DOSSIER_MODELES) -> tuple[Pipeline, dict]:
-    """Charge le Pipeline et les métadonnées sauvegardés (jamais de réentraînement).
+def charger_artefacts(dossier: str = DOSSIER_MODELES, nom: str = MODELE_RETENU) -> tuple[Pipeline, dict]:
+    """Charge un Pipeline et les métadonnées sauvegardés (jamais de réentraînement).
 
-    Entrée : le dossier des modèles.
+    Entrées : le dossier des modèles, le nom du modèle (par défaut le modèle retenu).
     Sortie : (Pipeline entraîné, métadonnées).
     Échec : ModeleNonTrouveError si un des deux fichiers est absent.
     """
-    chemin_modele = os.path.join(dossier, NOM_MODELE)
+    chemin_pipeline = chemin_modele(dossier, nom)
     chemin_json = os.path.join(dossier, NOM_METADONNEES)
-    for chemin in (chemin_modele, chemin_json):
+    for chemin in (chemin_pipeline, chemin_json):
         if not os.path.exists(chemin):
             raise ModeleNonTrouveError(
                 f"Fichier introuvable : {os.path.normpath(chemin)}. Lancer d'abord « python src/modele.py »."
             )
-    with open(chemin_modele, "rb") as fichier:
+    with open(chemin_pipeline, "rb") as fichier:
         pipeline = joblib.load(fichier)
     with open(chemin_json, encoding="utf-8") as fichier:
         metadonnees = json.load(fichier)
@@ -652,15 +705,16 @@ if __name__ == "__main__":
     ID_REFERENCES = [51157, 48374, 49608]  # YUL, St-Hubert, Mirabel
 
     tableau_final = construire_tableau(Station(ID_MCTAVISH), [Station(i) for i in ID_REFERENCES])
-    modele, meta = entrainer(tableau_final)
-    chemins = sauvegarder_artefacts(modele, meta)
+    modeles, meta = entrainer(tableau_final)
+    chemins = sauvegarder_artefacts(modeles, meta)
 
-    print(f"{len(tableau_final)} lignes, entraînement du MLP : {meta['duree_entrainement_s']} s")
+    print(f"{len(tableau_final)} lignes ; modèle retenu : {meta['type_modele']}")
     for decoupage, scores in meta["scores"].items():
         print(f"\nDécoupage {decoupage} :")
         for nom, valeurs in scores.items():
             print(f"  {nom:22} RMSE {valeurs['rmse']:.3f}  MAE {valeurs['mae']:.3f}  R² {valeurs['r2']:.3f}")
-    print("\nImportance des variables (hausse de la RMSE) :")
-    for colonne, valeur in meta["importance_variables"].items():
-        print(f"  {colonne:22} {valeur:.3f}")
-    print(f"\nSauvegardé : {chemins[0]}\n             {chemins[1]}")
+    for nom, importances in meta["importance_variables"].items():
+        print(f"\nImportance des variables, {nom} (hausse de la RMSE en °C) :")
+        for colonne, valeur in importances.items():
+            print(f"  {colonne:22} {valeur:.3f}")
+    print("\nSauvegardé :\n  " + "\n  ".join(chemins))
