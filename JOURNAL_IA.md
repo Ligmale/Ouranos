@@ -143,3 +143,22 @@ décision (gardé, modifié, rejeté).
   pour les 4 stations, le tableau pandas est identique à celui de l'ancienne logique Polars
   (8 760 lignes × 11 colonnes, mêmes valeurs et mêmes tendances).
 - **Décision :** _à compléter après relecture par l'équipe (gardé / modifié / rejeté)_
+
+## 13. Séance de questions sur `src/modele.py` (2026-11-17)
+
+- **Outil :** Claude Code (Claude Opus 5.5)
+- **Demandé :** nous poser des questions sur tous les choix du modèle, une série à la fois,
+  avec une recommandation pour chacune, puis résumer les décisions.
+- **Réponse reçue :** 20 questions (type de modèle, découpage, métrique, valeurs manquantes,
+  forme de l'objet sauvegardé, scores de référence, contenu du JSON, structure du code,
+  tests) et explications du `Pipeline` contre le dict et des scores de référence. Décisions
+  prises : MLP gardé (contre la forêt validée) + régression linéaire en comparaison, sans
+  revalidation ; découpage chronologique officiel (6 derniers jours de chaque mois) ; **RMSE
+  officielle**, calculée avec NumPy ; imputation dans un seul `Pipeline` (médiane, constante
+  « Inconnu ») ; références moyenne globale et moyenne par station ; `permutation_importance` ;
+  JSON avec colonnes, catégories, limites, scores et écart moyen par heure ; `predire()` dans
+  `modele.py` ; petites fonctions et tests.
+- **Vérification faite :** chaque question comparée au code de `src/modele.py` et à
+  `DECISIONS.md`. Cette vérification a changé une décision : le décalage optimisé avec scipy
+  était calculé sur le jeu de test (fuite) ; nous l'avons retiré.
+- **Décision :** _à compléter après relecture par l'équipe (gardé / modifié / rejeté)_
