@@ -162,3 +162,21 @@ décision (gardé, modifié, rejeté).
   `DECISIONS.md`. Cette vérification a changé une décision : le décalage optimisé avec scipy
   était calculé sur le jeu de test (fuite) ; nous l'avons retiré.
 - **Décision :** _à compléter après relecture par l'équipe (gardé / modifié / rejeté)_
+
+## 14. Modèle retenu vérifié contre l'énoncé (2026-11-17)
+
+- **Outil :** Claude Code (Claude Opus 5.5)
+- **Demandé :** finir le `README.md` (résultats du modèle, couverture, documentation, outils du
+  chapitre 7).
+- **Réponse reçue :** avant d'écrire, Claude a relu l'énoncé et signalé que le Volet 2 limite le
+  modèle à « régression linéaire ou logistique, k plus proches voisins, arbre de décision ou
+  forêt aléatoire » et que « l'apprentissage profond est exclu », alors que notre modèle retenu
+  était un réseau de neurones (`MLPRegressor`), choisi lors de la séance de questions (entrée 13)
+  sans revalidation par l'auxiliaire.
+- **Vérification faite :** lecture du Volet 2 de `Énoncé_Projet.pdf` (page 2). Comparaison des
+  scores sur le découpage chronologique : MLP RMSE 1,20 °C, régression linéaire 1,31 °C,
+  moyenne par station 1,52 °C.
+- **Décision :** **modifié.** La régression linéaire devient le modèle retenu et le seul utilisé
+  par l'interface (score officiel RMSE 1,31 °C) ; le MLP est encore entraîné et sauvegardé
+  (`modeles/mlp.joblib`), en comparaison seulement. `DECISIONS.md`, le JSON de métadonnées et le
+  `README.md` sont mis à jour.
