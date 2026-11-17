@@ -14,20 +14,19 @@ import pandas as pd
 import pytest
 from sklearn.metrics import mean_squared_error
 
+from donnees import VariableCategorielle, VariableNumerique
 from exceptions import DonneeInvalideError, ModeleNonTrouveError
 from modele import (
     CARACTERISTIQUES_CATEGORIELLES,
     CARACTERISTIQUES_NUMERIQUES,
     VALEUR_INCONNUE,
     calculer_rmse_numpy,
-    charger_artefacts,
+    Predicteur,
     chronometrer,
     construire_pipeline,
     decouper_chronologique,
     ecart_moyen_par_heure,
     entrainer,
-    hors_valeurs_vues,
-    predire,
     preparer_saisie,
     sauvegarder_artefacts,
     scores_reference,
@@ -206,57 +205,91 @@ def test_sauvegarde_puis_chargement(modele_entraine, tmp_path):
     pipeline, meta = modele_entraine
     chemin_modele, chemin_json = sauvegarder_artefacts(pipeline, meta, str(tmp_path))
     assert os.path.exists(chemin_modele) and os.path.exists(chemin_json)
-    recharge, meta_rechargees = charger_artefacts(str(tmp_path))
-    assert meta_rechargees == meta
-    ligne = preparer_saisie(saisie_valide(), datetime(2025, 1, 15, 3), meta)
-    assert predire(recharge, ligne) == pytest.approx(predire(pipeline, ligne))
+    recharge = Predicteur.depuis_dossier(str(tmp_path))
+    assert recharge.metadonnees == meta
+    date = datetime(2025, 1, 15, 3)
+    assert recharge.predire(saisie_valide(), date).ecart == pytest.approx(Predicteur(pipeline, meta).predire(saisie_valide(), date).ecart)
 
 
 def test_chargement_dossier_vide(tmp_path):
     with pytest.raises(ModeleNonTrouveError):
-        charger_artefacts(str(tmp_path))
+        Predicteur.depuis_dossier(str(tmp_path))
 
 
 # --- Saisie et prédiction ---------------------------------------------------
 
 
-def test_preparer_saisie_calcule_saison_et_moment(modele_entraine):
-    ligne = preparer_saisie(saisie_valide(), datetime(2025, 7, 10, 14), modele_entraine[1])
+@pytest.fixture(scope="module")
+def predicteur(modele_entraine) -> Predicteur:
+    return Predicteur(*modele_entraine)
+
+
+def test_predicteur_contient_les_variables(predicteur):
+    variables = predicteur.variables
+    # un champ par variable saisie ; saison et moment sont calculés depuis la date
+    assert set(variables) == set(CARACTERISTIQUES_NUMERIQUES + CARACTERISTIQUES_CATEGORIELLES) - {"saison", "moment_journee"}
+    assert isinstance(variables["Rel Hum (%)"], VariableNumerique)
+    assert isinstance(variables["Station Name"], VariableCategorielle)
+    variables.clear()  # copie : le Predicteur n'est pas modifié
+    assert len(predicteur.variables) == 9
+
+
+def test_predicteur_rmse_et_repr(predicteur, modele_entraine):
+    assert predicteur.rmse == pytest.approx(modele_entraine[1]["rmse_officielle"])
+    assert repr(predicteur).startswith("Predicteur(")
+
+
+def test_preparer_saisie_calcule_saison_et_moment(predicteur):
+    ligne = preparer_saisie(saisie_valide(), datetime(2025, 7, 10, 14), predicteur.variables)
     assert ligne.loc[0, "saison"] == "ete"
     assert ligne.loc[0, "moment_journee"] == "apres-midi"
     assert ligne.loc[0, "Temp (°C)"] == pytest.approx(-5.0)  # « -5,0 » accepté
 
 
-def test_predire_retourne_un_float(modele_entraine):
-    pipeline, meta = modele_entraine
-    ecart = predire(pipeline, preparer_saisie(saisie_valide(), datetime(2025, 1, 15, 3), meta))
-    assert isinstance(ecart, float)
-    assert -10 < ecart < 10
+def test_predire_retourne_une_prediction(predicteur):
+    prediction = predicteur.predire(saisie_valide(), datetime(2025, 1, 15, 3))
+    assert isinstance(prediction.ecart, float)
+    assert -10 < prediction.ecart < 10
+    assert prediction.temperature_reference == pytest.approx(-5.0)
+    assert prediction.temperature_centre_ville == pytest.approx(-5.0 + prediction.ecart)
+    assert prediction.hors_valeurs_vues == [] and prediction.champs_vides == []
+
+
+def test_predire_champs_facultatifs_vides(predicteur):
+    saisie = saisie_valide() | {"Visibility (km)": "", "Wind Spd (km/h)": "  ", "Rel Hum (%)": None}
+    prediction = predicteur.predire(saisie, datetime(2025, 1, 15, 3))
+    assert np.isfinite(prediction.ecart)
+    assert prediction.champs_vides == ["Rel Hum (%)", "Wind Spd (km/h)", "Visibility (km)"]
+    assert prediction.hors_valeurs_vues == []  # une case vide n'est pas « hors des valeurs vues »
+
+
+def test_predire_temperature_obligatoire(predicteur):
+    with pytest.raises(DonneeInvalideError):
+        predicteur.predire(saisie_valide() | {"Temp (°C)": ""}, datetime(2025, 1, 15, 3))
 
 
 @pytest.mark.parametrize("colonne, valeur", [
     ("Rel Hum (%)", 150),             # hors limites physiques
     ("Temp (°C)", "chaud"),            # non numérique
-    ("Wind Spd (km/h)", ""),           # vide
+    ("Wind Spd (km/h)", "abc"),        # non numérique, même si le champ est facultatif
     ("Station Name", "MCTAVISH"),      # catégorie non permise (et fuite)
 ])
-def test_preparer_saisie_invalide(modele_entraine, colonne, valeur):
+def test_predire_saisie_invalide(predicteur, colonne, valeur):
     saisie = saisie_valide() | {colonne: valeur}
     with pytest.raises(DonneeInvalideError):
-        preparer_saisie(saisie, datetime(2025, 1, 15, 3), modele_entraine[1])
+        predicteur.predire(saisie, datetime(2025, 1, 15, 3))
 
 
-def test_preparer_saisie_champ_absent(modele_entraine):
+def test_predire_champ_absent(predicteur):
     saisie = saisie_valide()
     del saisie["Visibility (km)"]
     with pytest.raises(DonneeInvalideError):
-        preparer_saisie(saisie, datetime(2025, 1, 15, 3), modele_entraine[1])
+        predicteur.predire(saisie, datetime(2025, 1, 15, 3))
 
 
-def test_hors_valeurs_vues(modele_entraine):
-    meta = modele_entraine[1]
-    ligne = preparer_saisie(saisie_valide() | {"Temp (°C)": 40}, datetime(2025, 1, 15, 3), meta)
-    assert hors_valeurs_vues(ligne, meta) == ["Temp (°C)"]
+def test_predire_hors_valeurs_vues(predicteur):
+    prediction = predicteur.predire(saisie_valide() | {"Temp (°C)": 40}, datetime(2025, 1, 15, 3))
+    assert prediction.hors_valeurs_vues == ["Temp (°C)"]
 
 
 # --- Décorateur -------------------------------------------------------------

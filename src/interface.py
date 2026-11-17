@@ -15,20 +15,37 @@ import streamlit as st
 
 from donnees import moment_journee, saison as calculer_saison
 from exceptions import DonneeInvalideError, ErreurPredictionError, ModeleNonTrouveError
-from modele import charger_artefacts, hors_valeurs_vues, predire, preparer_saisie
+from modele import NUMERIQUES_FACULTATIVES, Prediction, Predicteur
 
 CHEMIN_HISTORIQUE = os.path.join("historique", "predictions.csv")
 
 
 @st.cache_resource   #Le modèle est chargé une seule fois et gardé en mémoire vive (jamais réentraîné)
-def charger():
-    "Charge le Pipeline et les métadonnées depuis modeles/ (voir modele.charger_artefacts)."
-    return charger_artefacts()
+def charger() -> Predicteur:
+    "Charge le Predicteur (Pipeline + métadonnées + variables) depuis modeles/."
+    return Predicteur.depuis_dossier()
 
 
-def bornes(numeriques: dict, colonne: str) -> dict:
-    "Limites physiques d'une variable numérique, tirées du JSON, pour st.number_input."
-    return {"min_value": float(numeriques[colonne]["min_physique"]), "max_value": float(numeriques[colonne]["max_physique"])}
+#Champs numériques : (colonne, étiquette, valeur par défaut). Zones de texte : pas de boutons
+#+/−, « 7,6 » ou « 7.6 » acceptés ; la validation est faite par les classes Variable.
+CHAMPS_NUMERIQUES = [
+    ("Temp (°C)", "Température (°C)", "8,5"),
+    ("Dew Point Temp (°C)", "Point de rosée (°C)", "7,6"),
+    ("Rel Hum (%)", "Humidité (%)", "94"),
+    ("Stn Press (kPa)", "Pression (kPa)", "101,2"),
+    ("Wind Spd (km/h)", "Vent (km/h)", "4"),
+    ("Visibility (km)", "Visibilité (km)", "24"),
+]
+
+
+def champ_numerique(numeriques: dict, colonne: str, etiquette: str, defaut: str) -> str:
+    "Zone de texte pour une variable numérique ; l'aide rappelle les limites tirées du JSON."
+    limites = numeriques[colonne]
+    facultatif = colonne in NUMERIQUES_FACULTATIVES
+    aide = f"Entre {limites['min_physique']:g} et {limites['max_physique']:g}."
+    if facultatif:
+        aide += " Laisser vide si inconnu."
+    return st.sidebar.text_input(etiquette + (" — facultatif" if facultatif else ""), value=defaut, help=aide)
 
 
 def lire_saisie(metadonnees: dict) -> tuple[dict, datetime, bool]:
@@ -52,60 +69,52 @@ def lire_saisie(metadonnees: dict) -> tuple[dict, datetime, bool]:
     moment = moment_journee(heure_mesure)
     st.sidebar.markdown(f"**Saison :** {saison} — **Moment :** {moment} *(calculés automatiquement)*")
 
-    #Saisie des variables numériques et catégorielles (bornes et choix tirés du JSON)
-    saisie = {
-        "Temp (°C)": st.sidebar.number_input("Température (°C)", value=8.5, format="%.1f", **bornes(numeriques, "Temp (°C)")),
-        "Dew Point Temp (°C)": st.sidebar.number_input("Point de rosée (°C)", value=7.6, format="%.1f", **bornes(numeriques, "Dew Point Temp (°C)")),
-        "Rel Hum (%)": st.sidebar.number_input("Humidité (%)", value=94.0, format="%.0f", **bornes(numeriques, "Rel Hum (%)")),
-        "Stn Press (kPa)": st.sidebar.number_input("Pression (kPa)", value=101.2, format="%.1f", **bornes(numeriques, "Stn Press (kPa)")),
-        "Wind Spd (km/h)": st.sidebar.number_input("Vent (km/h)", value=4.0, format="%.0f", **bornes(numeriques, "Wind Spd (km/h)")),
-        "Visibility (km)": st.sidebar.number_input("Visibilité (km)", value=24.0, format="%.1f", **bornes(numeriques, "Visibility (km)")),
-        "Station Name": station_ref,
-        "direction_8_points": st.sidebar.selectbox("Direction du vent", categorielles["direction_8_points"]),
-        #Valeurs en minuscules comme dans station.py ; format_func ne change que l'affichage.
-        "tendance_pression": st.sidebar.radio(
-            "Tendance de la pression (3h)", categorielles["tendance_pression"], format_func=str.capitalize
-        ),
-    }
+    #Saisie des variables numériques et catégorielles (limites et choix tirés du JSON)
+    saisie: dict = {colonne: champ_numerique(numeriques, colonne, etiquette, defaut)
+                    for colonne, etiquette, defaut in CHAMPS_NUMERIQUES}
+    saisie["Station Name"] = station_ref
+    saisie["direction_8_points"] = st.sidebar.selectbox("Direction du vent", categorielles["direction_8_points"])
+    #Valeurs en minuscules comme dans station.py ; format_func ne change que l'affichage.
+    saisie["tendance_pression"] = st.sidebar.radio(
+        "Tendance de la pression (3h)", categorielles["tendance_pression"], format_func=str.capitalize
+    )
 
     bouton_predire = st.sidebar.button("Prédire", type="primary")
     date_heure = datetime(date_mesure.year, date_mesure.month, date_mesure.day, heure_mesure)
     return saisie, date_heure, bouton_predire
 
 
-def afficher_resultat(saisie: dict, ecart_pred: float, metadonnees: dict) -> None:
+def afficher_resultat(station_ref: str, prediction: Prediction, rmse_modele: float) -> None:
     "Affiche l'écart prédit et la température estimée au centre-ville, avec la RMSE comme marge."
-    temp_ref = saisie["Temp (°C)"]
     st.markdown("Résultat")
     colonne1, colonne2 = st.columns(2)
-    rmse_modele = metadonnees["rmse_officielle"]
 
     with colonne1:
         st.metric(
             label="Écart prédit (McTavish - Référence)",
-            value=f"{ecart_pred:+.1f} °C",
+            value=f"{prediction.ecart:+.1f} °C",
             delta=f"± {rmse_modele:.1f} °C (erreur RMSE, découpage chronologique)",
             delta_color="off",
         )
     with colonne2:
         st.metric(
             label="Température estimée au centre-ville",
-            value=f"{temp_ref + ecart_pred:.1f} °C",
-            delta=f"{temp_ref} °C mesurés à {saisie['Station Name']} {ecart_pred:+.1f} °C",
+            value=f"{prediction.temperature_centre_ville:.1f} °C",
+            delta=f"{prediction.temperature_reference:.1f} °C mesurés à {station_ref} {prediction.ecart:+.1f} °C",
             delta_color="off",
         )
 
 
-def enregistrer_historique(saisie: dict, date_heure: datetime, ecart_pred: float) -> None:
+def enregistrer_historique(saisie: dict, date_heure: datetime, prediction: Prediction) -> None:
     "Ajoute la prédiction en tête de l'historique CSV (dossier créé au besoin)."
-    temp_ref = saisie["Temp (°C)"]
+    vent = str(saisie["Wind Spd (km/h)"]).strip()
     nouvelle_ligne = pd.DataFrame([{
         "Date et heure": date_heure.strftime("%Y-%m-%d %H:00"),
         "Référence": saisie["Station Name"],
-        "Température référence": f"{temp_ref} °C",
-        "Vent": f"{saisie['Wind Spd (km/h)']} km/h",
-        "Écart prédit": f"{ecart_pred:+.1f} °C",
-        "Centre-ville": f"{temp_ref + ecart_pred:+.1f} °C"
+        "Température référence": f"{prediction.temperature_reference:.1f} °C",
+        "Vent": f"{vent} km/h" if vent else "inconnu",
+        "Écart prédit": f"{prediction.ecart:+.1f} °C",
+        "Centre-ville": f"{prediction.temperature_centre_ville:+.1f} °C"
     }])
 
     os.makedirs(os.path.dirname(CHEMIN_HISTORIQUE), exist_ok=True)
@@ -159,27 +168,27 @@ def afficher_application() -> None:
     st.markdown("Combien fait-il de plus au centre-ville (McTavish) qu'à l'aéroport? Estimation de l'îlot de chaleur urbain à partir des conditions mesurées")
 
     try:
-        pipeline, metadonnees = charger()
+        predicteur = charger()
     except ModeleNonTrouveError as erreur:
         st.error(f"Aucun modèle entraîné trouvé. {erreur}")
         st.stop()
         raise  # jamais atteint : st.stop() arrête le script (indique à Pyright que la suite est sûre)
 
+    metadonnees = predicteur.metadonnees
     saisie, date_heure, bouton_predire = lire_saisie(metadonnees)
 
     if bouton_predire:
         try:
-            #Validation de la saisie (classes Variable) et prédiction : la logique est dans modele.py
-            ligne = preparer_saisie(saisie, date_heure, metadonnees)
-            ecart_pred = predire(pipeline, ligne)
+            #Validation de la saisie (classes Variable) et prédiction : la logique est dans modele.Predicteur
+            prediction = predicteur.predire(saisie, date_heure)
+            if prediction.hors_valeurs_vues:
+                st.warning(f"Valeurs hors de celles vues à l'entraînement : {', '.join(prediction.hors_valeurs_vues)}. Prédiction moins fiable.")
+            if prediction.champs_vides:
+                st.info(f"Champs vides remplacés par la valeur médiane de l'entraînement : {', '.join(prediction.champs_vides)}.")
 
-            hors = hors_valeurs_vues(ligne, metadonnees)
-            if hors:
-                st.warning(f"Valeurs hors de celles vues à l'entraînement : {', '.join(hors)}. Prédiction moins fiable.")
-
-            afficher_resultat(saisie, ecart_pred, metadonnees)
-            enregistrer_historique(saisie, date_heure, ecart_pred)
-            afficher_graphique(metadonnees, saisie["Station Name"], date_heure.hour, ecart_pred)
+            afficher_resultat(saisie["Station Name"], prediction, predicteur.rmse)
+            enregistrer_historique(saisie, date_heure, prediction)
+            afficher_graphique(metadonnees, saisie["Station Name"], date_heure.hour, prediction.ecart)
         except (DonneeInvalideError, ErreurPredictionError) as e:
             st.error(f"Prédiction impossible : {e}")
 

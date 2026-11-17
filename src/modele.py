@@ -11,6 +11,7 @@ import json
 import os
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime
 from functools import wraps
 from typing import Any, cast
@@ -56,6 +57,9 @@ CIBLE = "ecart"
 # Valeur donnée aux catégories manquantes ; l'interface peut la proposer pour ces colonnes.
 VALEUR_INCONNUE = "Inconnu"
 CATEGORIES_FACULTATIVES = ["direction_8_points", "tendance_pression"]
+# Champs numériques qu'on peut laisser vides (remplacés par la médiane d'entraînement).
+# La température reste obligatoire : elle sert à estimer la température du centre-ville.
+NUMERIQUES_FACULTATIVES = [c for c in CARACTERISTIQUES_NUMERIQUES if c != "Temp (°C)"]
 
 # Limites physiques (validation de la saisie), larges mais réalistes pour Montréal.
 LIMITES_PHYSIQUES = {
@@ -495,35 +499,51 @@ def creer_variables(metadonnees: dict) -> dict[str, VariableNumerique | Variable
     return variables
 
 
-def preparer_saisie(saisie: dict, date_heure: datetime, metadonnees: dict) -> pd.DataFrame:
+def preparer_saisie(
+    saisie: dict, date_heure: datetime, variables: dict[str, VariableNumerique | VariableCategorielle]
+) -> pd.DataFrame:
     """Valide une saisie et la met sous la forme d'une ligne pour le Pipeline.
 
     Entrées : {colonne: valeur saisie} pour chaque champ, la date et l'heure de la mesure,
-        les métadonnées.
-    Sortie : un DataFrame d'une ligne avec toutes les caractéristiques.
+        les variables qui valident chaque champ (voir creer_variables).
+    Sortie : un DataFrame d'une ligne avec toutes les caractéristiques ; un champ numérique
+        facultatif laissé vide devient NaN (le Pipeline le remplace par la médiane).
     Échec : DonneeInvalideError si une valeur manque, n'est pas valide ou est hors limites.
     """
     ligne: dict[str, object] = {}
-    for colonne, variable in creer_variables(metadonnees).items():
+    for colonne, variable in variables.items():
         if colonne not in saisie:
             raise DonneeInvalideError(f"{colonne} : valeur absente de la saisie.")
-        ligne[colonne] = variable.valider(saisie[colonne])
+        if colonne in NUMERIQUES_FACULTATIVES and est_vide(saisie[colonne]):
+            ligne[colonne] = np.nan
+        else:
+            ligne[colonne] = variable.valider(saisie[colonne])
     ligne["saison"] = saison(date_heure.month)
     ligne["moment_journee"] = moment_journee(date_heure.hour)
     return pd.DataFrame([ligne]).loc[:, CARACTERISTIQUES_NUMERIQUES + CARACTERISTIQUES_CATEGORIELLES]
+
+
+def est_vide(valeur: object) -> bool:
+    """Indique si une saisie est vide (None, texte vide ou seulement des espaces).
+
+    Entrée : la valeur saisie.
+    Sortie : True si elle est vide.
+    """
+    return valeur is None or str(valeur).strip() == ""
 
 
 def hors_valeurs_vues(saisie: pd.DataFrame, metadonnees: dict) -> list[str]:
     """Liste les variables numériques hors du min/max vu à l'entraînement (avertissement).
 
     Entrées : la ligne préparée par preparer_saisie, les métadonnées.
-    Sortie : les noms des colonnes concernées (liste vide si tout est dans les valeurs vues).
+    Sortie : les noms des colonnes concernées (liste vide si tout est dans les valeurs vues) ;
+        une valeur manquante (NaN) n'est pas signalée.
     Échec : KeyError si les métadonnées sont incomplètes.
     """
     hors = []
     for colonne, bornes in metadonnees["numeriques"].items():
         valeur = float(saisie[colonne].iloc[0])
-        if not bornes["min_entrainement"] <= valeur <= bornes["max_entrainement"]:
+        if not np.isnan(valeur) and not bornes["min_entrainement"] <= valeur <= bornes["max_entrainement"]:
             hors.append(colonne)
     return hors
 
@@ -539,6 +559,82 @@ def predire(pipeline: Pipeline, saisie: pd.DataFrame) -> float:
         return float(pipeline.predict(saisie)[0])
     except (ValueError, KeyError) as erreur:
         raise ErreurPredictionError(f"Le modèle n'a pas pu prédire : {erreur}") from erreur
+
+
+@dataclass(frozen=True)
+class Prediction:
+    """Résultat d'une prédiction (immuable)."""
+
+    ecart: float
+    temperature_reference: float
+    hors_valeurs_vues: list[str]
+    champs_vides: list[str]
+
+    @property
+    def temperature_centre_ville(self) -> float:
+        """Température estimée à McTavish : température de la référence + écart prédit."""
+        return self.temperature_reference + self.ecart
+
+
+class Predicteur:
+    """Modèle prêt à l'emploi pour l'interface.
+
+    Composition : un Predicteur contient le Pipeline entraîné, ses métadonnées et une
+    Variable par champ de saisie. Les attributs sont privés (encapsulation) : on les lit
+    par des propriétés, on ne les remplace pas.
+    """
+
+    def __init__(self, pipeline: Pipeline, metadonnees: dict) -> None:
+        """Entrées : le Pipeline entraîné et ses métadonnées.
+        Échec : KeyError si les métadonnées sont incomplètes.
+        """
+        self._pipeline = pipeline
+        self._metadonnees = metadonnees
+        self._variables = creer_variables(metadonnees)
+
+    @classmethod
+    def depuis_dossier(cls, dossier: str = DOSSIER_MODELES) -> "Predicteur":
+        """Crée un Predicteur à partir des fichiers sauvegardés (jamais de réentraînement).
+
+        Entrée : le dossier des modèles.
+        Sortie : le Predicteur.
+        Échec : ModeleNonTrouveError si un des fichiers est absent.
+        """
+        return cls(*charger_artefacts(dossier))
+
+    @property
+    def metadonnees(self) -> dict:
+        """Métadonnées du modèle (stations, bornes, catégories, scores…)."""
+        return self._metadonnees
+
+    @property
+    def variables(self) -> dict[str, VariableNumerique | VariableCategorielle]:
+        """Copie du dictionnaire des variables : le modifier ne change pas le Predicteur."""
+        return dict(self._variables)
+
+    @property
+    def rmse(self) -> float:
+        """RMSE officielle (découpage chronologique), en °C : la marge d'erreur affichée."""
+        return float(self._metadonnees["rmse_officielle"])
+
+    def predire(self, saisie: dict, date_heure: datetime) -> Prediction:
+        """Valide la saisie et prédit l'écart McTavish − référence.
+
+        Entrées : {colonne: valeur saisie}, la date et l'heure de la mesure.
+        Sortie : la Prediction (écart, température de référence, avertissements).
+        Échec : DonneeInvalideError si la saisie est invalide ;
+            ErreurPredictionError si le Pipeline refuse la ligne.
+        """
+        ligne = preparer_saisie(saisie, date_heure, self._variables)
+        return Prediction(
+            ecart=predire(self._pipeline, ligne),
+            temperature_reference=float(ligne.loc[0, "Temp (°C)"]),
+            hors_valeurs_vues=hors_valeurs_vues(ligne, self._metadonnees),
+            champs_vides=[c for c in NUMERIQUES_FACULTATIVES if pd.isna(ligne.loc[0, c])],
+        )
+
+    def __repr__(self) -> str:
+        return f"Predicteur({self._metadonnees['type_modele']!r}, RMSE {self.rmse:.2f} °C, {len(self._variables)} variables)"
 
 
 # ---------------------------------------------------------------------------
