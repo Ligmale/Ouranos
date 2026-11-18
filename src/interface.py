@@ -19,7 +19,9 @@ from exceptions import DonneeInvalideError, ErreurPredictionError, ModeleNonTrou
 from modele import NUMERIQUES_FACULTATIVES, Prediction, Predicteur
 
 CHEMIN_HISTORIQUE = os.path.join("historique", "predictions.csv")
-CHEMIN_POLICE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "Inter.ttf")
+DOSSIER_STATIC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+CHEMIN_POLICE = os.path.join(DOSSIER_STATIC, "Inter.ttf")
+CHEMIN_POLICE_TITRES = os.path.join(DOSSIER_STATIC, "Cinzel.ttf")
 
 
 #Couleurs du thème sombre de Streamlit, reprises dans le graphique pour qu'il s'y fonde.
@@ -35,6 +37,8 @@ def configurer_matplotlib() -> None:
     if os.path.exists(CHEMIN_POLICE):
         font_manager.fontManager.addfont(CHEMIN_POLICE)
         plt.rcParams["font.family"] = "Inter"
+    if os.path.exists(CHEMIN_POLICE_TITRES):
+        font_manager.fontManager.addfont(CHEMIN_POLICE_TITRES)
 
 
 configurer_matplotlib()
@@ -165,7 +169,8 @@ def courbe_json(valeurs: list) -> list[float]:
 
 def preparer_axe_heures(ax, titre: str, etiquette_y: str) -> None:
     "Mise en forme commune des deux sous-graphiques (axe des heures, grille, légende)."
-    ax.set_title(titre, fontsize=11)
+    police_titre = "Cinzel" if os.path.exists(CHEMIN_POLICE_TITRES) else None
+    ax.set_title(titre, fontsize=11, fontfamily=police_titre)
     ax.set_xlabel("Heure (HNL)")
     ax.set_ylabel(etiquette_y)
     ax.set_xticks([0, 6, 12, 18, 23])

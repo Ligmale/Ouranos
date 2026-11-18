@@ -70,7 +70,7 @@ Les modèles entraînés sont inclus dans le dépôt (`modeles/`) : pour seuleme
 l'application, l'étape 3 suffit. L'application n'entraîne jamais de modèle au lancement.
 
 L'interface ([Streamlit](https://streamlit.io), en local seulement) fonctionne **sans
-réseau** : la police (Inter) est servie depuis `src/static/` et le thème sombre est réglé
+réseau** : les polices (Inter, et Cinzel pour les titres) sont servies depuis `src/static/` et le thème sombre est réglé
 dans `.streamlit/config.toml`.
 
 - **Saisie** (barre latérale) : station de référence, date, heure, puis les mesures. Seule la
@@ -127,7 +127,7 @@ src/
   exceptions.py      exceptions personnalisées (DonneeInvalideError, ModeleNonTrouveError…)
   interface.py       interface Streamlit (affichage seulement, la logique est dans modele.py)
   main.py            point d'entrée : streamlit run src/main.py
-  static/            police Inter et sa licence
+  static/            polices Inter et Cinzel et leurs licences
 tests/               tests pytest (test_donnees.py, test_modele.py, fake_donnees/)
 modeles/             regression_lineaire.joblib, mlp.joblib, metadonnees.json
 donnees/brutes/      CSV d'ECCC (non versionnés, créés par telechargement.py)
@@ -232,6 +232,7 @@ et le `% 8` ramène 360° sur N (le secteur N va de 337,5° à 22,5°).
 
 - Données : Licence du gouvernement ouvert – Canada (ECCC).
 - Police Inter : SIL Open Font License 1.1 (`src/static/Inter-OFL.txt`).
+- Police Cinzel (titres) : SIL Open Font License 1.1 (`src/static/Cinzel-OFL.txt`).
 
 ## Voir aussi
 

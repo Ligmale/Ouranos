@@ -10,11 +10,19 @@ base = "dark"
 # Inter : police sans empattement conçue pour les écrans, chiffres et accents lisibles.
 # Licence SIL Open Font License 1.1 (src/static/Inter-OFL.txt).
 font = "Inter"
-headingFont = "Inter"
+# Cinzel pour les titres : capitales inspirées des inscriptions antiques (vibe Ouranos).
+# Licence SIL Open Font License 1.1 (src/static/Cinzel-OFL.txt).
+headingFont = "Cinzel"
 metricValueFontWeight = 600
 
 [[theme.fontFaces]]
 family = "Inter"
 url = "app/static/Inter.ttf"
 weight = "100 900"   # police variable : un seul fichier pour toutes les graisses
+style = "normal"
+
+[[theme.fontFaces]]
+family = "Cinzel"
+url = "app/static/Cinzel.ttf"
+weight = "400 900"   # police variable
 style = "normal"
