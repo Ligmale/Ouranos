@@ -29,8 +29,8 @@ l'application prédit l'écart de température et en déduit la température au 
   | MONTREAL MIRABEL INTL A (rural, 42 km au nord) | référence | 49608 |
 
 - **Fichiers bruts :** 48 CSV (4 stations × 12 mois), 6,4 Mo, dans `donnees/brutes/`.
-  Ils **ne sont pas inclus dans le dépôt** : chacun les télécharge une fois avec
-  `python src/telechargement.py` (voir Utilisation).
+  Ils **sont inclus dans le dépôt** (licence du gouvernement ouvert – Canada) : l'étape 1
+  ci-dessous n'est utile que pour les retélécharger ou ajouter d'autres années.
 - **Tableau final :** **26 179 lignes**, une par (heure, station de référence) :
   - **cible** `ecart` = température McTavish − température de la référence, à la même heure
     (régression, en °C) ; les heures sans cible sont retirées, jamais imputées ;
