@@ -5,6 +5,7 @@ fonctions appelées par afficher_application(), pas au niveau du module (un modu
 n'est exécuté qu'une fois). La logique (validation, prédiction) est dans modele.py.
 """
 
+import html
 import os
 from datetime import datetime
 
@@ -82,14 +83,38 @@ def nom_station(code: str) -> str:
     return NOMS_STATIONS.get(code, code)
 
 
-def champ_numerique(numeriques: dict, colonne: str, etiquette: str, defaut: str) -> str:
-    "Zone de texte pour une variable numérique ; l'aide rappelle les limites tirées du JSON."
-    limites = numeriques[colonne]
+def marquer_invalide(cle: str, message: str) -> None:
+    "Encadre en rouge le champ de clé `cle` et affiche le message d'erreur juste en dessous."
+    #Streamlit donne au conteneur d'un widget la classe CSS « st-key-<clé> »
+    st.html(f"<style>.st-key-{cle} [data-testid='stTextInputRootElement'] {{ border-color: {ROUGE} !important;"
+            f" box-shadow: 0 0 0 1px {ROUGE}; }}</style>")
+    #Le message commence par le nom de colonne ECCC (« Temp (°C) : … ») : inutile sous le champ
+    texte = message.split(" : ", 1)[-1]
+    st.sidebar.markdown(f"<p style='color:{ROUGE};font-size:13px;margin-top:-10px'>{html.escape(texte)}</p>",
+                        unsafe_allow_html=True)
+
+
+def champ_numerique(predicteur: Predicteur, numero: int, colonne: str, etiquette: str,
+                    defaut: str) -> tuple[str, bool]:
+    """Zone de texte pour une variable numérique, vérifiée dès la saisie.
+
+    Entrées : le Predicteur (bornes et validation), un numéro unique pour la clé du champ,
+        la colonne, l'étiquette affichée et la valeur par défaut.
+    Sortie : (texte saisi, True s'il est valide). Un champ invalide est encadré en rouge avec
+        son message ; aucune exception n'est levée.
+    """
+    limites = predicteur.metadonnees["numeriques"][colonne]
     facultatif = colonne in NUMERIQUES_FACULTATIVES
     aide = f"Entre {limites['min_physique']:g} et {limites['max_physique']:g}."
     if facultatif:
         aide += " Laisser vide si inconnu."
-    return st.sidebar.text_input(etiquette + (" — facultatif" if facultatif else ""), value=defaut, help=aide)
+    cle = f"champ_{numero}"
+    valeur = st.sidebar.text_input(etiquette + (" — facultatif" if facultatif else ""), value=defaut,
+                                   help=aide, key=cle)
+    message = predicteur.erreur_champ(colonne, valeur)  # la validation reste dans les classes Variable
+    if message is not None:
+        marquer_invalide(cle, message)
+    return valeur, message is None
 
 
 def champ_heure() -> int:
@@ -112,14 +137,14 @@ def champ_heure() -> int:
     return heure
 
 
-def lire_saisie(metadonnees: dict) -> tuple[dict, datetime, bool]:
+def lire_saisie(predicteur: Predicteur) -> tuple[dict, datetime, bool]:
     """Affiche la barre latérale de saisie.
 
-    Entrée : les métadonnées (stations, bornes et catégories tirées du JSON).
+    Entrée : le Predicteur (stations, bornes et catégories tirées du JSON, validation).
     Sortie : (saisie {colonne: valeur}, date et heure de la mesure, bouton « Prédire » cliqué).
+        Le bouton est désactivé tant qu'un champ est invalide : la saisie est refusée.
     """
-    numeriques = metadonnees["numeriques"]
-    categorielles = metadonnees["categorielles"]
+    categorielles = predicteur.metadonnees["categorielles"]
 
     st.sidebar.header("Conditions mesurées")
     st.sidebar.markdown("À la station de référence choisie")
@@ -136,8 +161,11 @@ def lire_saisie(metadonnees: dict) -> tuple[dict, datetime, bool]:
     st.sidebar.markdown(f"**Saison :** {NOMS_SAISONS.get(saison, saison)} — **Moment :** {moment} *(calculés automatiquement)*")
 
     #Saisie des variables numériques et catégorielles (limites et choix tirés du JSON)
-    saisie: dict = {colonne: champ_numerique(numeriques, colonne, etiquette, defaut)
-                    for colonne, etiquette, defaut in CHAMPS_NUMERIQUES}
+    saisie: dict = {}
+    champs_valides = []
+    for numero, (colonne, etiquette, defaut) in enumerate(CHAMPS_NUMERIQUES):
+        saisie[colonne], valide = champ_numerique(predicteur, numero, colonne, etiquette, defaut)
+        champs_valides.append(valide)
     saisie["Station Name"] = station_ref
     saisie["direction_8_points"] = st.sidebar.selectbox("Direction du vent", categorielles["direction_8_points"])
     #Valeurs en minuscules comme dans station.py ; format_func ne change que l'affichage.
@@ -145,7 +173,11 @@ def lire_saisie(metadonnees: dict) -> tuple[dict, datetime, bool]:
         "Tendance de la pression (3h)", categorielles["tendance_pression"], format_func=str.capitalize
     )
 
-    bouton_predire = st.sidebar.button("Prédire", type="primary")
+    saisie_valide = all(champs_valides)
+    bouton_predire = st.sidebar.button("Prédire", type="primary", disabled=not saisie_valide)
+    if not saisie_valide:
+        st.sidebar.markdown(f"<p style='color:{ROUGE};font-size:13px'>Corrigez les champs en rouge pour prédire.</p>",
+                            unsafe_allow_html=True)
     date_heure = datetime(date_mesure.year, date_mesure.month, date_mesure.day, heure_mesure)
     return saisie, date_heure, bouton_predire
 
@@ -301,7 +333,7 @@ def afficher_application() -> None:
 
     metadonnees = predicteur.metadonnees
     st.caption(f"Modèle : {metadonnees['type_modele']} — erreur typique (RMSE) ± {predicteur.rmse:.1f} °C")
-    saisie, date_heure, bouton_predire = lire_saisie(metadonnees)
+    saisie, date_heure, bouton_predire = lire_saisie(predicteur)
 
     prediction = None
     if bouton_predire:

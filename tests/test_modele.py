@@ -306,6 +306,21 @@ def test_predire_saisie_invalide(predicteur, colonne, valeur):
         predicteur.predire(saisie, datetime(2025, 1, 15, 3))
 
 
+@pytest.mark.parametrize("colonne, valeur, attendu_valide", [
+    ("Temp (°C)", "8,5", True),          # virgule acceptée
+    ("Temp (°C)", "", False),            # obligatoire
+    ("Rel Hum (%)", "", True),           # facultatif vide
+    ("Rel Hum (%)", "150", False),       # hors limites
+    ("Wind Spd (km/h)", "abc", False),   # non numérique
+    ("Colonne inconnue", "1", False),
+])
+def test_erreur_champ(predicteur, colonne, valeur, attendu_valide):
+    message = predicteur.erreur_champ(colonne, valeur)
+    assert (message is None) == attendu_valide
+    if not attendu_valide:
+        assert isinstance(message, str) and message
+
+
 def test_predire_champ_absent(predicteur):
     saisie = saisie_valide()
     del saisie["Visibility (km)"]

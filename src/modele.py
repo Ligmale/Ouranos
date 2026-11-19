@@ -670,6 +670,24 @@ class Predicteur:
         """RMSE officielle (découpage chronologique), en °C : la marge d'erreur affichée."""
         return float(self._metadonnees["rmse_officielle"])
 
+    def erreur_champ(self, colonne: str, valeur: object) -> str | None:
+        """Vérifie un seul champ, pour le signaler dès la saisie (avant « Prédire »).
+
+        Entrées : la colonne (ex. "Temp (°C)") et la valeur saisie.
+        Sortie : None si la valeur est acceptée (un facultatif vide l'est), sinon le message
+            d'erreur à afficher. Ne lève jamais d'exception pour une saisie invalide.
+        """
+        if colonne in NUMERIQUES_FACULTATIVES and est_vide(valeur):
+            return None
+        variable = self._variables.get(colonne)
+        if variable is None:
+            return f"{colonne} : variable inconnue du modèle."
+        try:
+            variable.valider(valeur)
+        except DonneeInvalideError as erreur:
+            return str(erreur)
+        return None
+
     def predire(self, saisie: dict, date_heure: datetime) -> Prediction:
         """Valide la saisie et prédit l'écart McTavish − référence.
 
