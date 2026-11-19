@@ -6,7 +6,7 @@ n'est exécuté qu'une fois). La logique (validation, prédiction) est dans mode
 """
 
 import os
-from datetime import datetime, time
+from datetime import datetime
 
 import matplotlib.pyplot as plt
 from matplotlib import font_manager
@@ -92,6 +92,26 @@ def champ_numerique(numeriques: dict, colonne: str, etiquette: str, defaut: str)
     return st.sidebar.text_input(etiquette + (" — facultatif" if facultatif else ""), value=defaut, help=aide)
 
 
+def champ_heure() -> int:
+    """Heure HH:MM en 24 h, comme une alarme : deux cases séparées par « : ».
+
+    Sortie : l'heure (0 à 23). Les minutes sont affichées mais ignorées (données horaires).
+    """
+    #Même taille que les étiquettes des autres champs (un markdown simple serait plus grand)
+    st.sidebar.markdown("<p style='font-size:14px;margin-bottom:-3px'>Heure (HNL)</p>", unsafe_allow_html=True,
+                        help="Les minutes sont ignorées : les mesures sont horaires.")
+    #Colonnes vides de chaque côté : les deux cases, étroites, restent groupées au centre
+    _, case_heures, deux_points, case_minutes, _ = st.sidebar.columns([1, 2, 0.5, 2, 1], gap=None,
+                                                                       vertical_alignment="center")
+    heure = case_heures.selectbox("Heures", range(24), index=23, format_func=lambda h: f"{h:02d}",
+                                  label_visibility="collapsed")
+    deux_points.markdown("<div style='text-align:center;font-size:1.4rem;font-weight:600;line-height:1;margin-top:-6px'>:</div>",
+                         unsafe_allow_html=True)
+    case_minutes.selectbox("Minutes", range(60), index=0, format_func=lambda m: f"{m:02d}",
+                           label_visibility="collapsed")
+    return heure
+
+
 def lire_saisie(metadonnees: dict) -> tuple[dict, datetime, bool]:
     """Affiche la barre latérale de saisie.
 
@@ -108,9 +128,7 @@ def lire_saisie(metadonnees: dict) -> tuple[dict, datetime, bool]:
                                        format_func=nom_station)  # n'affiche que le nom de région
     date_mesure = st.sidebar.date_input("Date")
     #Saisie HH:MM en 24 h, comme une alarme ; seules les heures comptent (données horaires)
-    heure_saisie = st.sidebar.time_input("Heure (HNL)", value=time(23, 0), format="24h",
-                                         help="Les minutes sont ignorées : les mesures sont horaires.")
-    heure_mesure = heure_saisie.hour
+    heure_mesure = champ_heure()
 
     #Détermination automatique de la saison et du moment de la journée (même logique que l'entraînement)
     saison = calculer_saison(date_mesure.month)
