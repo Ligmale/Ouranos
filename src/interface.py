@@ -24,16 +24,23 @@ CHEMIN_POLICE = os.path.join(DOSSIER_STATIC, "Inter.ttf")
 CHEMIN_POLICE_TITRES = os.path.join(DOSSIER_STATIC, "Cinzel.ttf")
 
 
-#Couleurs du thème sombre de Streamlit, reprises dans le graphique pour qu'il s'y fonde.
-FOND_SOMBRE = "#0E1117"
-TEXTE_CLAIR = "#FAFAFA"
+#Palette des graphiques, reprise du thème sombre de la page (noir, gris, rouge) pour qu'ils s'y fondent.
+FOND_SOMBRE = "#171614"   # fond de la page (mesuré dans le navigateur, thème sombre de Streamlit)
+TEXTE_CLAIR = "#FAFAFA"   # texte principal
+GRIS_CLAIR = "#C9C6BF"    # courbe secondaire (station de référence)
+GRIS_MOYEN = "#8A8780"    # axes, graduations, ligne de l'heure choisie
+GRIS_FONCE = "#3A3835"    # grille et cadre
+ROUGE = "#FF4B4B"         # couleur principale de Streamlit : écart, centre-ville, prédiction
 
 
 def configurer_matplotlib() -> None:
     "Graphiques Matplotlib en mode sombre, dans la même police que l'interface (Inter) si présente."
     plt.style.use("dark_background")
     plt.rcParams.update({"figure.facecolor": FOND_SOMBRE, "axes.facecolor": FOND_SOMBRE,
-                         "savefig.facecolor": FOND_SOMBRE, "text.color": TEXTE_CLAIR})
+                         "savefig.facecolor": FOND_SOMBRE, "text.color": TEXTE_CLAIR,
+                         "axes.edgecolor": GRIS_FONCE, "axes.labelcolor": GRIS_CLAIR,
+                         "xtick.color": GRIS_MOYEN, "ytick.color": GRIS_MOYEN,
+                         "grid.color": GRIS_FONCE})
     if os.path.exists(CHEMIN_POLICE):
         font_manager.fontManager.addfont(CHEMIN_POLICE)
         plt.rcParams["font.family"] = "Inter"
@@ -192,7 +199,7 @@ def preparer_axe_heures(ax, titre: str, etiquette_y: str) -> None:
     ax.set_ylabel(etiquette_y)
     ax.set_xticks([0, 6, 12, 18, 23])
     ax.set_xticklabels(["0h", "6h", "12h", "18h", "23h"])
-    ax.grid(True, linestyle="--", alpha=0.25)
+    ax.grid(True, linestyle="--", alpha=0.6)
     ax.legend(loc="best", frameon=False, fontsize=9)  # « best » : là où la légende cache le moins
 
 
@@ -217,11 +224,11 @@ def afficher_graphique(metadonnees: dict, station_ref: str, date_heure: datetime
 
     #Gauche : écart moyen selon l'heure (toute l'année)
     ecart_moyen = courbe_json(metadonnees["ecart_moyen_par_heure"][station_ref])
-    ax_ecart.plot(heures_jour, ecart_moyen, color="#4DA3FF", linewidth=2.5, label="Écart moyen (2025)")
+    ax_ecart.plot(heures_jour, ecart_moyen, color=ROUGE, linewidth=2.5, label="Écart moyen (2025)")
     if prediction is not None:
-        ax_ecart.scatter([heure], [prediction.ecart], color="#FF4B4B", s=110, zorder=5, label="Écart prédit")
-    ax_ecart.axvline(heure, color="#FFD43B", linewidth=1.4, linestyle="--", alpha=0.8, label=f"{heure} h choisie")
-    ax_ecart.axhline(0, color="#FAFAFA", linewidth=0.8, alpha=0.4)
+        ax_ecart.scatter([heure], [prediction.ecart], color=TEXTE_CLAIR, edgecolor=ROUGE, linewidth=2, s=110, zorder=5, label="Écart prédit")
+    ax_ecart.axvline(heure, color=GRIS_MOYEN, linewidth=1.4, linestyle="--", label=f"{heure} h choisie")
+    ax_ecart.axhline(0, color=GRIS_MOYEN, linewidth=0.8)
     preparer_axe_heures(ax_ecart, "Écart McTavish − référence", "Écart (°C)")
 
     #Droite : températures moyennes de la saison de la date choisie
@@ -231,16 +238,16 @@ def afficher_graphique(metadonnees: dict, station_ref: str, date_heure: datetime
                      ha="center", va="center", transform=ax_temp.transAxes)
         ax_temp.set_axis_off()
     else:
-        ax_temp.plot(heures_jour, courbe_json(temperatures["reference"]), color="#4DA3FF", linewidth=2,
+        ax_temp.plot(heures_jour, courbe_json(temperatures["reference"]), color=GRIS_CLAIR, linewidth=2,
                      label=f"Référence ({nom_saison}, moyenne)")
-        ax_temp.plot(heures_jour, courbe_json(temperatures["centre_ville"]), color="#FFA94D", linewidth=2,
+        ax_temp.plot(heures_jour, courbe_json(temperatures["centre_ville"]), color=ROUGE, linewidth=2,
                      label=f"Centre-ville ({nom_saison}, moyenne)")
         if prediction is not None:
-            ax_temp.scatter([heure], [prediction.temperature_reference], color="#4DA3FF", edgecolor="#FAFAFA",
+            ax_temp.scatter([heure], [prediction.temperature_reference], color=GRIS_CLAIR, edgecolor=TEXTE_CLAIR,
                             s=90, zorder=5, label="Température saisie")
-            ax_temp.scatter([heure], [prediction.temperature_centre_ville], color="#FF4B4B", s=110, zorder=5,
+            ax_temp.scatter([heure], [prediction.temperature_centre_ville], color=TEXTE_CLAIR, edgecolor=ROUGE, linewidth=2, s=110, zorder=5,
                             label="Centre-ville estimé")
-        ax_temp.axvline(heure, color="#FFD43B", linewidth=1.4, linestyle="--", alpha=0.8)
+        ax_temp.axvline(heure, color=GRIS_MOYEN, linewidth=1.4, linestyle="--")
         preparer_axe_heures(ax_temp, f"Températures moyennes en {nom_saison}", "Température (°C)")
 
     fig.tight_layout()  # évite de couper les titres des axes
