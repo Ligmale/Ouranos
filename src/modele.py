@@ -99,6 +99,7 @@ def chronometrer(fonction: Callable) -> Callable:
 
     @wraps(fonction)
     def enveloppe(*args: Any, **kwargs: Any) -> Any:
+        """Appelle la fonction avec les mêmes arguments, note sa durée et retourne son résultat."""
         debut = time.perf_counter()
         resultat = fonction(*args, **kwargs)
         enveloppe.derniere_duree = time.perf_counter() - debut  # type: ignore[attr-defined]
@@ -705,6 +706,7 @@ class Predicteur:
         )
 
     def __repr__(self) -> str:
+        """Résumé lisible : type de modèle, RMSE officielle et nombre de variables."""
         return f"Predicteur({self._metadonnees['type_modele']!r}, RMSE {self.rmse:.2f} °C, {len(self._variables)} variables)"
 
 

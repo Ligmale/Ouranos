@@ -43,7 +43,15 @@ except FileNotFoundError:
 
 
 class Station:
-    def __init__(self, station_id: int, mois: list[int] | None = None, years: list[int] | None = None):
+    """Données horaires d'une station ECCC : chargement des CSV mensuels, nettoyage et cible."""
+
+    def __init__(self, station_id: int, mois: list[int] | None = None, years: list[int] | None = None) -> None:
+        """Charge et nettoie aussitôt les données de la station.
+
+        Entrées : l'identifiant ECCC (voir STATIONS_ID), les mois (1 à 12, tous par défaut)
+            et les années (2025 par défaut).
+        Échec : ValueError si un mois ou une année est invalide ; FileNotFoundError si un CSV manque.
+        """
         self.station_id = station_id
         # Deux attributs, un type chacun : les mois bruts, puis le tableau nettoyé.
         self._brutes: list[pd.DataFrame] = []
@@ -53,9 +61,18 @@ class Station:
 
     @property
     def data(self) -> pd.DataFrame:
+        """Tableau nettoyé de la station (lecture seule)."""
         return self._data
 
     def load_data(self, mois: list[int] | None = None, years: list[int] | None = None) -> list[pd.DataFrame]:
+        """Lit un CSV par (année, mois) dans donnees/brutes/, avec les types numériques imposés.
+
+        Entrées : les mois (1 à 12, tous par défaut) et les années (2025 par défaut).
+        Sortie : la liste des tableaux bruts, un par mois (aussi gardée dans self._brutes) ;
+            vide si la station n'est pas dans STATIONS_ID.
+        Échec : ValueError si un mois n'est pas entre 1 et 12 ou une année dépasse 2026 ;
+            FileNotFoundError si un CSV est absent (lancer telechargement.py).
+        """
         self._brutes = []
         if mois is None:
             mois = list(range(1, 13))
@@ -83,6 +100,12 @@ class Station:
         return self._brutes
 
     def clean_data(self) -> pd.DataFrame:
+        """Assemble les mois, garde les colonnes utiles, trie par date et ajoute la tendance de pression.
+
+        Sortie : le tableau nettoyé (aussi gardé dans self._data), avec « delta_pression3h »
+            (variation sur 3 h) et « tendance_pression » (hausse, stable, baisse ; None si inconnue).
+        Échec : ValueError si aucun mois n'a été chargé ; KeyError si une colonne attendue manque.
+        """
         # Tri par date : shift(3) décale de 3 lignes, qui doivent être 3 heures.
         self._data = (
             pd.concat(self._brutes, ignore_index=True)[COLONNES_GARDEES]
@@ -101,6 +124,11 @@ class Station:
         return self._data
 
     def make_target(self) -> pd.DataFrame:
+        """Réduit les données à la date et à la température : la cible, côté McTavish.
+
+        Sortie : un tableau à deux colonnes (« Temp (°C) », « Date/Time (LST) »), qui remplace self._data.
+        Échec : comme clean_data.
+        """
         self._data = self.clean_data()[COLONNES_CIBLE_GARDEES]
         return self._data
 

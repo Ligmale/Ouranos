@@ -11,6 +11,7 @@ from datetime import datetime
 
 import matplotlib.pyplot as plt
 from matplotlib import font_manager
+from matplotlib.axes import Axes
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -241,7 +242,7 @@ def courbe_json(valeurs: list) -> list[float]:
     return [np.nan if v is None else v for v in valeurs]
 
 
-def preparer_axe_heures(ax, titre: str, etiquette_y: str) -> None:
+def preparer_axe_heures(ax: Axes, titre: str, etiquette_y: str) -> None:
     "Mise en forme commune des deux sous-graphiques (axe des heures, grille, légende)."
     police_titre = "Cinzel" if os.path.exists(CHEMIN_POLICE_TITRES) else None
     ax.set_title(titre, fontsize=11, fontfamily=police_titre)

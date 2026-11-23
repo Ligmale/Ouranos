@@ -221,6 +221,7 @@ class Variable(ABC):
         return str(valeur).strip()
 
     def __repr__(self) -> str:
+        """Représentation lisible pour le débogage, ex. Variable('saison')."""
         return f"{type(self).__name__}({self._nom!r})"
 
 
@@ -237,10 +238,12 @@ class VariableNumerique(Variable):
 
     @property
     def minimum(self) -> float:
+        """Borne inférieure acceptée, incluse (lecture seule)."""
         return self._minimum
 
     @property
     def maximum(self) -> float:
+        """Borne supérieure acceptée, incluse (lecture seule)."""
         return self._maximum
 
     def valider(self, valeur: object) -> float:
@@ -261,6 +264,7 @@ class VariableNumerique(Variable):
         return nombre
 
     def __repr__(self) -> str:
+        """Représentation avec le nom et les bornes, ex. VariableNumerique('Temp (°C)', -50.0, 45.0)."""
         return f"VariableNumerique({self._nom!r}, {self._minimum}, {self._maximum})"
 
 
@@ -292,4 +296,5 @@ class VariableCategorielle(Variable):
         return texte
 
     def __repr__(self) -> str:
+        """Représentation avec le nom et les valeurs permises."""
         return f"VariableCategorielle({self._nom!r}, {self._valeurs_permises})"
