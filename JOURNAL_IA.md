@@ -180,3 +180,24 @@ décision (gardé, modifié, rejeté).
   par l'interface (score officiel RMSE 1,31 °C) ; le MLP est encore entraîné et sauvegardé
   (`modeles/mlp.joblib`), en comparaison seulement. `DECISIONS.md`, le JSON de métadonnées et le
   `README.md` sont mis à jour.
+
+## 15. Comparaison du code avec l'énoncé, graphique d'exploration et docstrings (2026-11-23)
+
+- **Outil :** Claude Code (Claude Opus 5.5)
+- **Demandé :** comparer le projet à l'énoncé (`Projet_2_INF1007_Enonce.pdf`, sur Moodle) pour
+  trouver ce qui manque, puis faire le graphique d'exploration et compléter les docstrings.
+- **Réponse reçue :** liste des manques ; les deux principaux dans le code étaient l'absence de
+  graphique d'exploration enregistré avec `savefig` (exigé au chapitre 13) et des fonctions
+  sans docstring ni annotations (exigées au chapitre 6), surtout dans la classe `Station` et dans
+  `exceptions.py`. Code produit : `src/exploration.py` (écart moyen selon l'heure par référence et
+  distribution de l'écart, enregistrés dans `figures/exploration_ecart.png`),
+  `tests/test_exploration.py` (7 tests), docstrings et annotations ajoutées, `README.md` mis à
+  jour (graphique, commande, structure, 144 tests, couverture remesurée à 88 % pour la logique).
+- **Vérification faite :** relecture de l'énoncé (sections 3, 5 et 8) ; tests lancés (144
+  passent) ; un script `ast` qui liste les fonctions de `src/` sans docstring ni annotation (plus
+  aucune) ; le graphique ouvert et regardé : la légende cachait la courbe de Mirabel et a été
+  déplacée deux fois. Les moyennes par heure du graphique concordent avec les constats déjà
+  écrits dans le README (écart maximal vers 2 h à 4 h, minimal vers 12 h à 16 h).
+- **Décision :** **gardé**, poussé sur `main`. Ces commits (et quatre plus anciens) ont
+  « Claude » comme auteur dans l'historique Git : ils ont été faits depuis la session Claude Code,
+  pas par un membre de l'équipe.
