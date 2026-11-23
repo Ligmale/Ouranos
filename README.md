@@ -59,6 +59,7 @@ Toutes les commandes se lancent **depuis la racine du dépôt**.
 ```bash
 python src/telechargement.py     # 1. télécharger les données (une seule fois)
 python src/modele.py             # 2. entraîner et sauvegarder les modèles (< 1 min)
+python src/exploration.py        #    (facultatif) refaire le graphique d'exploration dans figures/
 streamlit run src/main.py        # 3. lancer l'application : http://localhost:8501
 ```
 
@@ -95,23 +96,24 @@ pytest
 coverage run --source=src -m pytest && coverage report
 ```
 
-131 tests pytest, sans réseau ni dossier `donnees/` (petits CSV dans `tests/fake_donnees/` et
+144 tests pytest, sans réseau ni dossier `donnees/` (petits CSV dans `tests/fake_donnees/` et
 tableau synthétique) : cas usuels, cas limites, cas d'erreur avec `pytest.raises`, flottants
 avec `pytest.approx`. Le workflow GitHub Actions (`.github/workflows/tests.yml`) lance
 `pytest` à chaque push.
 
-**Couverture** (`coverage`, mesurée le 2026-11-17) :
+**Couverture** (`coverage`, mesurée le 2026-11-23) :
 
 | Module | Couverture |
 |---|---|
 | `src/donnees.py` | 93 % |
-| `src/modele.py` | 91 % |
+| `src/modele.py` | 92 % |
+| `src/exploration.py` | 85 % (la partie `__main__`, qui lit les vraies données, n'est pas testée) |
 | `src/exceptions.py` | 91 % |
 | `src/station.py` | 79 % |
 | `src/telechargement.py` | 72 % (sans réseau : le téléchargement lui-même n'est pas testé) |
-| **Logique (5 modules ci-dessus)** | **88 %** |
+| **Logique (6 modules ci-dessus)** | **88 %** |
 | `src/interface.py`, `src/main.py` | 0 % (interface Streamlit, non testée par pytest) |
-| **Tout `src/`** | **70 %** |
+| **Tout `src/`** | **68 %** |
 
 ## Structure du code
 
@@ -124,11 +126,13 @@ src/
                      VariableCategorielle
   modele.py          découpages, Pipeline, entraînement, scores, métadonnées, sauvegarde,
                      classes Predicteur et Prediction ; script d'entraînement
+  exploration.py     graphique d'exploration de l'écart (enregistré avec savefig dans figures/)
   exceptions.py      exceptions personnalisées (DonneeInvalideError, ModeleNonTrouveError…)
   interface.py       interface Streamlit (affichage seulement, la logique est dans modele.py)
   main.py            point d'entrée : streamlit run src/main.py
   static/            polices Inter et Cinzel et leurs licences
-tests/               tests pytest (test_donnees.py, test_modele.py, fake_donnees/)
+tests/               tests pytest (test_donnees.py, test_modele.py, test_exploration.py, fake_donnees/)
+figures/             graphique d'exploration (exploration_ecart.png)
 modeles/             regression_lineaire.joblib, mlp.joblib, metadonnees.json
 donnees/brutes/      CSV d'ECCC (non versionnés, créés par telechargement.py)
 historique/          historique des prédictions (créé par l'application)
@@ -177,6 +181,14 @@ découpage aléatoire est trop optimiste. **Le score officiel est le chronologiq
 - R² = 0,38 : le modèle explique une partie seulement des variations. Aucun score suspect
   (R² proche de 1) : l'importance par permutation place en tête la station, l'humidité et le
   point de rosée, pas de fuite visible.
+
+**Graphique d'exploration** (`python src/exploration.py`, tout le tableau final) :
+
+![Écart moyen selon l'heure et distribution de l'écart par référence](figures/exploration_ecart.png)
+
+À gauche, l'écart moyen pour chaque heure ; à droite, sa distribution par référence (boîtes à
+moustaches : les points sont les valeurs extrêmes, jusqu'à +13 °C contre Mirabel). Ces valeurs
+extrêmes ne sont pas retirées du tableau.
 
 **Constats sur les données** (écart moyen selon l'heure, entraînement) :
 
